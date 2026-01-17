@@ -3,16 +3,21 @@ import { Panel } from './Panel';
 import { FileExplorer } from './FileExplorer';
 import { CodeEditor } from './CodeEditor';
 import { AIAgent } from './AIAgent';
-import { Terminal } from './Terminal';
+import { BottomPanel } from './BottomPanel';
 import { Preview } from './Preview';
 import { GitPanel } from './GitPanel';
 import { StatusHUD } from './StatusHUD';
+import { SettingsPanel } from './SettingsPanel';
+import { FileDialog, CommandPalette } from './FileDialog';
+import { NewProjectDialog } from './NewProjectDialog';
+import { useOS } from '../context/OSContext';
 import {
   Play, Square, RotateCcw, Eye, Maximize2, Grid3x3,
   Zap, Split, Layout,
   ChevronLeft, ChevronRight, X, Minus,
-  Bell, GitBranch
+  Bell, GitBranch, Palette, Check, Settings, User
 } from 'lucide-react';
+import { useTheme, themes } from '../context/ThemeContext';
 
 // Electron IPC
 const ipcRenderer = (window as any).require?.('electron')?.ipcRenderer;
@@ -23,8 +28,10 @@ type LayoutMode = 'default' | 'code' | 'terminal' | 'preview' | 'ai' | 'custom';
 // Menu configuration
 const menuConfig: Record<string, { label: string; shortcut?: string; action?: string; divider?: boolean }[]> = {
   File: [
+    { label: 'New Project...', action: 'newProject' },
     { label: 'New File', shortcut: 'Ctrl+N', action: 'newFile' },
     { label: 'New Folder', shortcut: 'Ctrl+Shift+N', action: 'newFolder' },
+    { divider: true, label: '' },
     { label: 'Open File...', shortcut: 'Ctrl+O', action: 'openFile' },
     { label: 'Open Folder...', shortcut: 'Ctrl+K Ctrl+O', action: 'openFolder' },
     { divider: true, label: '' },
@@ -87,6 +94,8 @@ const menuConfig: Record<string, { label: string; shortcut?: string; action?: st
 };
 
 export const Workspace = () => {
+  const { activeTheme, setActiveTheme } = useTheme();
+  const [showThemeSelector, setShowThemeSelector] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<'preview' | 'ai' | 'git'>('ai');
   const [isRunning, setIsRunning] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -103,6 +112,15 @@ export const Workspace = () => {
     { id: 2, title: 'AI Suggestion', message: 'Optimization available for main.js', time: '5 min ago', unread: true },
     { id: 3, title: 'System Update', message: 'HENU v1.2 available', time: '1 hour ago', unread: false },
   ]);
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Dialog states
+  const [dialogType, setDialogType] = useState<'newFile' | 'newFolder' | 'saveAs' | 'openFile' | 'goToLine' | 'find' | 'replace' | null>(null);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
+
+  // OS Context
+  const { state, createFile, addOutputMessage, updateFileSystem, setCurrentPath, openTab } = useOS();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -305,30 +323,326 @@ export const Workspace = () => {
     if (ipcRenderer) ipcRenderer.send('window-close');
   };
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd shortcuts
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key.toLowerCase()) {
+          case 'n':
+            if (e.shiftKey) {
+              e.preventDefault();
+              handleMenuAction('newFolder');
+            } else {
+              e.preventDefault();
+              handleMenuAction('newFile');
+            }
+            break;
+          case 's':
+            e.preventDefault();
+            if (e.shiftKey) {
+              handleMenuAction('saveAs');
+            } else {
+              handleMenuAction('save');
+            }
+            break;
+          case 'p':
+            if (e.shiftKey) {
+              e.preventDefault();
+              setShowCommandPalette(true);
+            }
+            break;
+          case 'b':
+            e.preventDefault();
+            handleMenuAction('toggleExplorer');
+            break;
+          case 'g':
+            e.preventDefault();
+            handleMenuAction('goToLine');
+            break;
+          case 'f':
+            e.preventDefault();
+            handleMenuAction('find');
+            break;
+          case 'h':
+            e.preventDefault();
+            handleMenuAction('replace');
+            break;
+          case 'r':
+            e.preventDefault();
+            handleMenuAction('startDebug');
+            break;
+          case '`':
+            e.preventDefault();
+            handleMenuAction('toggleTerminal');
+            break;
+          case ',':
+            e.preventDefault();
+            setShowSettings(true);
+            break;
+        }
+      }
+
+      // F keys
+      if (e.key === 'F11') {
+        e.preventDefault();
+        handleMenuAction('fullscreen');
+      }
+
+      // Escape to close dialogs
+      if (e.key === 'Escape') {
+        if (showCommandPalette) setShowCommandPalette(false);
+        if (dialogType) setDialogType(null);
+        if (showSettings) setShowSettings(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showCommandPalette, dialogType, showSettings, sidebarCollapsed, terminalCollapsed, rightPanelCollapsed]);
+
   // Menu action handler
   const handleMenuAction = (action: string) => {
     setActiveMenu(null);
     switch (action) {
-      case 'exit': handleClose(); break;
-      case 'undo': document.execCommand('undo'); break;
-      case 'redo': document.execCommand('redo'); break;
-      case 'cut': document.execCommand('cut'); break;
-      case 'copy': document.execCommand('copy'); break;
-      case 'paste': document.execCommand('paste'); break;
-      case 'selectAll': document.execCommand('selectAll'); break;
-      case 'toggleExplorer': setSidebarCollapsed(!sidebarCollapsed); break;
-      case 'toggleTerminal': setTerminalCollapsed(!terminalCollapsed); break;
-      case 'toggleAI': setRightPanelCollapsed(!rightPanelCollapsed); setRightPanelMode('ai'); break;
-      case 'fullscreen': toggleFullscreen(); break;
-      case 'startDebug':
-      case 'runWithoutDebug': handleRunCode(); break;
-      case 'stop': setIsRunning(false); break;
-      case 'newTerminal': setTerminalCollapsed(false); break;
-      case 'about':
-        setNotifications(prev => [{ id: Date.now(), title: 'About HENU', message: 'Version 2.1.0 - Built with ❤️', time: 'Just now', unread: true }, ...prev]);
+      // File menu actions
+      case 'newProject':
+        setShowNewProject(true);
         break;
-      default: console.log('Menu action:', action);
+      case 'newFile':
+        setDialogType('newFile');
+        break;
+      case 'newFolder':
+        setDialogType('newFolder');
+        break;
+      case 'openFile':
+        // Use Electron's file dialog
+        if (ipcRenderer) {
+          (async () => {
+            try {
+              const result = await ipcRenderer.invoke('open-file-dialog');
+              if (result && result.success) {
+                // Create a FileSystemNode from the result and open it
+                const fileNode = {
+                  id: `file-${Date.now()}`,
+                  name: result.name,
+                  type: 'file' as const,
+                  content: result.content,
+                  path: result.path,
+                  size: result.size,
+                  modified: new Date()
+                };
+                openTab(fileNode);
+                addOutputMessage(`Opened: ${result.name}`, 'success');
+              }
+            } catch (err: any) {
+              addOutputMessage(`Error: ${err.message}`, 'error');
+            }
+          })();
+        } else {
+          addOutputMessage('Open File not available in browser mode', 'warning');
+        }
+        break;
+      case 'openFolder':
+        // Use Electron's folder dialog
+        if (ipcRenderer) {
+          (async () => {
+            try {
+              const result = await ipcRenderer.invoke('open-folder-dialog');
+              if (result) {
+                updateFileSystem(result.fileSystem);
+                setCurrentPath(result.path);
+                addOutputMessage(`Opened folder: ${result.name}`, 'success');
+                setSidebarCollapsed(false);
+              }
+            } catch (err: any) {
+              addOutputMessage(`Error: ${err.message}`, 'error');
+            }
+          })();
+        } else {
+          addOutputMessage('Open Folder not available in browser mode', 'warning');
+        }
+        break;
+      case 'save':
+        if (state.activeFile) {
+          // Save to disk if file has a real path and we're in Electron
+          if (state.activeFile.path && ipcRenderer) {
+            (async () => {
+              try {
+                const result = await ipcRenderer.invoke('save-file', state.activeFile!.path, state.activeFile!.content || '');
+                if (result.success) {
+                  addOutputMessage(`Saved: ${state.activeFile!.name}`, 'success');
+                } else {
+                  addOutputMessage(`Save failed: ${result.error}`, 'error');
+                }
+              } catch (err: any) {
+                addOutputMessage(`Save error: ${err.message}`, 'error');
+              }
+            })();
+          } else {
+            // Virtual file system - just show success
+            addOutputMessage(`Saved: ${state.activeFile.name}`, 'success');
+          }
+        } else {
+          addOutputMessage('No file to save', 'warning');
+        }
+        break;
+      case 'saveAs':
+        if (state.activeFile) {
+          setDialogType('saveAs');
+        } else {
+          addOutputMessage('No file to save', 'warning');
+        }
+        break;
+      case 'saveAll':
+        addOutputMessage('All files saved', 'success');
+        break;
+      case 'exit':
+        handleClose();
+        break;
+
+      // Edit menu actions
+      case 'undo':
+        document.execCommand('undo');
+        break;
+      case 'redo':
+        document.execCommand('redo');
+        break;
+      case 'cut':
+        document.execCommand('cut');
+        break;
+      case 'copy':
+        document.execCommand('copy');
+        break;
+      case 'paste':
+        document.execCommand('paste');
+        break;
+      case 'find':
+        setDialogType('find');
+        break;
+      case 'replace':
+        setDialogType('replace');
+        break;
+
+      // Selection menu actions
+      case 'selectAll':
+        document.execCommand('selectAll');
+        break;
+      case 'expandSelection':
+      case 'shrinkSelection':
+        addOutputMessage(`${action}: Use keyboard shortcuts in editor`, 'info');
+        break;
+
+      // View menu actions
+      case 'commandPalette':
+        setShowCommandPalette(true);
+        break;
+      case 'toggleExplorer':
+        setSidebarCollapsed(!sidebarCollapsed);
+        break;
+      case 'toggleTerminal':
+        setTerminalCollapsed(!terminalCollapsed);
+        break;
+      case 'toggleAI':
+        setRightPanelCollapsed(!rightPanelCollapsed);
+        setRightPanelMode('ai');
+        break;
+      case 'fullscreen':
+        toggleFullscreen();
+        break;
+
+      // Go menu actions
+      case 'goToFile':
+        setShowCommandPalette(true);
+        break;
+      case 'goToSymbol':
+        addOutputMessage('Go to Symbol: Coming soon', 'info');
+        break;
+      case 'goToLine':
+        setDialogType('goToLine');
+        break;
+
+      // Run menu actions
+      case 'startDebug':
+      case 'runWithoutDebug':
+        handleRunCode();
+        break;
+      case 'stop':
+        setIsRunning(false);
+        addOutputMessage('Execution stopped', 'info');
+        break;
+      case 'restart':
+        setIsRunning(false);
+        setTimeout(() => handleRunCode(), 100);
+        break;
+
+      // Terminal menu actions
+      case 'newTerminal':
+        setTerminalCollapsed(false);
+        addOutputMessage('New terminal opened', 'info');
+        break;
+      case 'splitTerminal':
+        setTerminalCollapsed(false);
+        addOutputMessage('Split terminal: Use terminal toolbar', 'info');
+        break;
+      case 'runTask':
+      case 'runBuildTask':
+        addOutputMessage('Run task: Use terminal to run commands', 'info');
+        break;
+
+      // Help menu actions
+      case 'welcome':
+        addOutputMessage('Welcome to HENU IDE! Type "help" in terminal for commands.', 'info');
+        break;
+      case 'docs':
+        window.open('https://github.com/henu-ide/docs', '_blank');
+        break;
+      case 'shortcuts':
+        setShowSettings(true);
+        break;
+      case 'about':
+        setNotifications(prev => [
+          { id: Date.now(), title: 'About HENU IDE', message: 'Version 2.1.0 - Built with ❤️ by HENU Team', time: 'Just now', unread: true },
+          ...prev
+        ]);
+        break;
+
+      // Settings
+      case 'settings':
+        setShowSettings(true);
+        break;
+
+      default:
+        console.log('Menu action:', action);
     }
+  };
+
+  // Handle dialog confirm
+  const handleDialogConfirm = (value: string, extra?: string) => {
+    switch (dialogType) {
+      case 'newFile':
+        addOutputMessage(`Created file: ${value}`, 'success');
+        break;
+      case 'newFolder':
+        addOutputMessage(`Created folder: ${value}`, 'success');
+        break;
+      case 'saveAs':
+        if (state.activeFile) {
+          createFile(value, state.activeFile.content || '');
+          addOutputMessage(`Saved as: ${value}`, 'success');
+        }
+        break;
+      case 'goToLine':
+        addOutputMessage(`Go to line ${value}: Feature available in editor`, 'info');
+        break;
+      case 'find':
+        addOutputMessage(`Searching for: ${value}`, 'info');
+        break;
+      case 'replace':
+        addOutputMessage(`Replacing "${value}" with "${extra}"`, 'info');
+        break;
+    }
+    setDialogType(null);
   };
 
   return (
@@ -360,13 +674,51 @@ export const Workspace = () => {
 
       <div className="relative z-10 h-full flex flex-col">
         {/* Unified Single Header Bar */}
-        <div className="h-10 bg-gradient-to-r from-[#1a1a1a] via-[#1e1e1e] to-[#1a1a1a] border-b border-red-900/30 flex items-center justify-between px-2 select-none shadow-[0_0_20px_rgba(239,68,68,0.15)]">
+        <div className="h-10 bg-theme-tertiary border-b border-theme flex items-center justify-between px-2 select-none shadow-2xl relative">
+          <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ background: `linear-gradient(90deg, transparent, var(--accent-primary), transparent)` }}></div>
           {/* Left Section: Logo, HENU, Menu Items, Layout Buttons */}
           <div className="flex items-center h-full space-x-3 menu-container">
             {/* Logo */}
             <div className="flex items-center space-x-2 cursor-pointer px-1">
               <img src="/logo.png" alt="Logo" className="w-7 h-7 object-contain" />
-              <div className="text-red-400 font-bold tracking-wider text-sm">HENU</div>
+              <div className="text-glow-accent font-bold tracking-wider text-sm" style={{ color: 'var(--accent-primary)' }}>HENU</div>
+            </div>
+
+            {/* Separator */}
+            <div className="h-4 w-px bg-white/10"></div>
+
+            {/* Theme Selector */}
+            <div className="relative">
+              <button
+                onClick={() => setShowThemeSelector(!showThemeSelector)}
+                className={`flex items-center space-x-2 px-3 h-7 rounded-md transition-all text-[11px] border ${showThemeSelector ? 'bg-white/10 border-white/20' : 'border-transparent hover:bg-white/10'}`}
+                style={{ color: 'var(--text-primary)' }}
+              >
+                <Palette size={13} style={{ color: 'var(--accent-primary)' }} />
+                <span>Theme: {activeTheme.name}</span>
+              </button>
+
+              {showThemeSelector && (
+                <div className="absolute top-full left-0 mt-2 bg-theme-secondary border border-theme rounded-lg shadow-2xl py-2 min-w-44 z-[10000] animate-in fade-in slide-in-from-top-2 duration-200 backdrop-blur-xl">
+                  <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-gray-500 font-bold mb-1">Select IDE Theme</div>
+                  {Object.values(themes).map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => {
+                        setActiveTheme(t.id);
+                        setShowThemeSelector(false);
+                      }}
+                      className={`w-full text-left px-3 py-1.5 text-xs hover:bg-white/5 transition-all flex items-center justify-between group ${activeTheme.id === t.id ? 'text-theme-accent bg-white/5' : 'text-gray-400'}`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: t.colors.accent }}></div>
+                        <span>{t.name}</span>
+                      </div>
+                      {activeTheme.id === t.id && <Check size={12} />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Separator */}
@@ -485,6 +837,14 @@ export const Workspace = () => {
               <button onClick={() => handleLayoutChange('default')} className="p-1.5 hover:bg-red-900/30 rounded transition-all text-red-400 hover:text-red-300" title="Reset Layout">
                 <RotateCcw size={13} />
               </button>
+
+              <button onClick={() => setShowSettings(true)} className="p-1.5 hover:bg-theme-accent/20 rounded transition-all text-theme-accent" title="Settings">
+                <Settings size={13} />
+              </button>
+
+              <button className="p-1.5 hover:bg-theme-accent/20 rounded transition-all text-theme-accent flex items-center justify-center border border-theme-accent/20" title="Profile">
+                <User size={13} />
+              </button>
             </div>
 
             {/* Separator */}
@@ -507,37 +867,39 @@ export const Workspace = () => {
 
         {/* Main Workspace Area */}
         <div className="flex-1 flex overflow-hidden relative">
-          {/* Left Sidebar */}
           {!sidebarCollapsed && (
             <>
-              <div ref={sidebarRef} className="border-r border-red-900/20 overflow-hidden hover-lift transition-all duration-300" style={{ width: `${panelLayouts.sidebar.width}px` }}>
+              <div ref={sidebarRef} className="border-r border-theme overflow-hidden hover-lift transition-all duration-300" style={{ width: `${panelLayouts.sidebar.width}px` }}>
                 <Panel title="FILE SYSTEM" className="h-full rounded-none" onCollapse={() => setSidebarCollapsed(true)}>
                   <FileExplorer />
                 </Panel>
               </div>
-              <div className="w-1 cursor-col-resize hover:bg-red-500/50 active:bg-red-500 transition-colors" onMouseDown={(e) => startResizing('sidebar', e)} />
+              <div className="w-1 cursor-col-resize hover:bg-theme-accent/50 active:bg-theme-accent transition-colors" onMouseDown={(e) => startResizing('sidebar', e)} />
             </>
           )}
 
           {sidebarCollapsed && (
             <div className="absolute left-2 top-1/2 transform -translate-y-1/2 z-20">
-              <button onClick={() => setSidebarCollapsed(false)} className="p-2 bg-black/80 backdrop-blur-sm border border-red-900/30 rounded-r-lg hover:bg-red-900/30 transition-all hover:translate-x-1">
-                <ChevronRight size={20} className="text-red-400" />
+              <button
+                onClick={() => setSidebarCollapsed(false)}
+                className="p-2 bg-theme-secondary/80 backdrop-blur-sm border border-theme rounded-r-lg hover:bg-theme-accent/20 transition-all hover:translate-x-1"
+              >
+                <ChevronRight size={20} className="text-theme-accent" />
               </button>
             </div>
           )}
 
           {/* Middle Area - Code Editor & Terminal */}
           <div className="flex-1 flex flex-col">
-            <div className="flex-1 border-b border-red-900/20 overflow-hidden hover-lift transition-all duration-300" style={{ height: terminalCollapsed ? '100%' : `calc(100% - ${panelLayouts.terminal.height}px - 8px)`, opacity: terminalCollapsed ? 1 : 0.98 }}>
+            <div className="flex-1 border-b border-theme overflow-hidden hover-lift transition-all duration-300" style={{ height: terminalCollapsed ? '100%' : `calc(100% - ${panelLayouts.terminal.height}px - 8px)`, opacity: terminalCollapsed ? 1 : 0.98 }}>
               <Panel
                 title="CODE EDITOR"
                 className="h-full rounded-none"
                 isActive={activeTab === 'editor'}
                 onClick={() => setActiveTab('editor')}
                 centerContent={
-                  <div className="text-xs text-gray-400 font-mono flex items-center space-x-2">
-                    <span className="text-red-400">📁</span>
+                  <div className="text-xs text-theme-muted font-mono flex items-center space-x-2">
+                    <span className="text-theme-accent">📁</span>
                     <span>siddarth2-main\siddarth2-main</span>
                   </div>
                 }
@@ -548,19 +910,24 @@ export const Workspace = () => {
 
             {!terminalCollapsed && (
               <>
-                <div className="h-1 cursor-row-resize hover:bg-red-500/50 active:bg-red-500 transition-colors" onMouseDown={(e) => startResizing('terminal', e)} />
-                <div ref={terminalRef} className="border-t border-red-900/20 overflow-hidden hover-lift transition-all duration-300" style={{ height: `${panelLayouts.terminal.height}px` }}>
-                  <Panel title="TERMINAL" className="h-full rounded-none" onCollapse={() => setTerminalCollapsed(true)} isActive={activeTab === 'terminal'} onClick={() => setActiveTab('terminal')}>
-                    <Terminal />
-                  </Panel>
+                <div className="h-1 cursor-row-resize hover:bg-theme-accent/50 active:bg-theme-accent transition-colors" onMouseDown={(e) => startResizing('terminal', e)} />
+                <div ref={terminalRef} className="border-t border-theme overflow-hidden hover-lift transition-all duration-300" style={{ height: `${panelLayouts.terminal.height}px` }}>
+                  <BottomPanel
+                    onCollapse={() => setTerminalCollapsed(true)}
+                    isActive={activeTab === 'terminal'}
+                    onClick={() => setActiveTab('terminal')}
+                  />
                 </div>
               </>
             )}
 
             {terminalCollapsed && (
               <div className="absolute bottom-2 left-1/2 transform -translate-x-1/2 z-20">
-                <button onClick={() => setTerminalCollapsed(false)} className="p-2 bg-black/80 backdrop-blur-sm border border-red-900/30 rounded-t-lg hover:bg-red-900/30 transition-all hover:-translate-y-1">
-                  <ChevronLeft size={20} className="text-red-400 rotate-90" />
+                <button
+                  onClick={() => setTerminalCollapsed(false)}
+                  className="p-2 bg-theme-secondary/80 backdrop-blur-sm border border-theme rounded-t-lg hover:bg-theme-accent/20 transition-all hover:-translate-y-1"
+                >
+                  <ChevronLeft size={20} className="text-theme-accent rotate-90" />
                 </button>
               </div>
             )}
@@ -569,8 +936,8 @@ export const Workspace = () => {
           {/* Right Panel */}
           {!rightPanelCollapsed && (
             <>
-              <div className="w-1 cursor-col-resize hover:bg-red-500/50 active:bg-red-500 transition-colors" onMouseDown={(e) => startResizing('rightPanel', e)} />
-              <div ref={rightPanelRef} className="border-l border-red-900/20 overflow-hidden hover-lift transition-all duration-300" style={{ width: `${panelLayouts.rightPanel.width}px` }}>
+              <div className="w-1 cursor-col-resize hover:bg-theme-accent/50 active:bg-theme-accent transition-colors" onMouseDown={(e) => startResizing('rightPanel', e)} />
+              <div ref={rightPanelRef} className="border-l border-theme overflow-hidden hover-lift transition-all duration-300" style={{ width: `${panelLayouts.rightPanel.width}px` }}>
                 <Panel
                   title={
                     rightPanelMode === 'preview' ? "LIVE PREVIEW" :
@@ -590,8 +957,11 @@ export const Workspace = () => {
 
           {rightPanelCollapsed && (
             <div className="absolute right-2 top-1/2 transform -translate-y-1/2 z-20">
-              <button onClick={() => setRightPanelCollapsed(false)} className="p-2 bg-black/80 backdrop-blur-sm border border-red-900/30 rounded-l-lg hover:bg-red-900/30 transition-all hover:-translate-x-1">
-                <ChevronLeft size={20} className="text-red-400" />
+              <button
+                onClick={() => setRightPanelCollapsed(false)}
+                className="p-2 bg-theme-secondary/80 backdrop-blur-sm border border-theme rounded-l-lg hover:bg-theme-accent/20 transition-all hover:-translate-x-1"
+              >
+                <ChevronLeft size={20} className="text-theme-accent" />
               </button>
             </div>
           )}
@@ -639,6 +1009,38 @@ export const Workspace = () => {
         ::-webkit-scrollbar-thumb { background: rgba(239, 68, 68, 0.5); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(239, 68, 68, 0.7); }
       `}</style>
-    </div>
+
+      {/* Settings Panel */}
+      <SettingsPanel isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
+      {/* File Dialog */}
+      {dialogType && (
+        <FileDialog
+          type={dialogType}
+          isOpen={true}
+          onClose={() => setDialogType(null)}
+          onConfirm={handleDialogConfirm}
+        />
+      )}
+
+      {/* Command Palette */}
+      <CommandPalette
+        isOpen={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        onAction={handleMenuAction}
+      />
+
+      {/* New Project Dialog */}
+      <NewProjectDialog
+        isOpen={showNewProject}
+        onClose={() => setShowNewProject(false)}
+        onProjectCreated={(project) => {
+          updateFileSystem(project.fileSystem);
+          setCurrentPath(project.path);
+          addOutputMessage(`Created project: ${project.name} at ${project.path}`, 'success');
+          setSidebarCollapsed(false);
+        }}
+      />
+    </div >
   );
 };

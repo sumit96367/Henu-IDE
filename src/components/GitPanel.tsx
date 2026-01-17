@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react';
 import {
     GitBranch as GitBranchIcon,
     GitCommit,
-    GitPullRequest,
-    GitMerge,
     Plus,
     Check,
     X,
@@ -12,7 +10,11 @@ import {
     Download,
     Clock,
     User,
-    FileText
+    FileText,
+    RotateCcw,
+    Undo2,
+    Search,
+    Trash2
 } from 'lucide-react';
 import { getGitService, GitStatus, GitCommit as GitCommitType, GitBranch } from '../services/GitService';
 
@@ -22,9 +24,11 @@ export const GitPanel = () => {
     const [branches, setBranches] = useState<GitBranch[]>([]);
     const [commitMessage, setCommitMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isRepo, setIsRepo] = useState<boolean | null>(null);
     const [showBranchDialog, setShowBranchDialog] = useState(false);
     const [newBranchName, setNewBranchName] = useState('');
     const [activeTab, setActiveTab] = useState<'changes' | 'commits' | 'branches'>('changes');
+    const [selectedDiff, setSelectedDiff] = useState<{ path: string, content: string } | null>(null);
 
     const gitService = getGitService();
 
@@ -33,23 +37,56 @@ export const GitPanel = () => {
     }, []);
 
     const loadGitData = async () => {
-        if (!gitService) return;
+        if (!gitService) {
+            setIsRepo(false);
+            return;
+        }
 
         setIsLoading(true);
         try {
-            const [statusData, commitsData, branchesData] = await Promise.all([
-                gitService.getStatus(),
-                gitService.log(20),
-                gitService.listBranches()
-            ]);
+            const hasRepo = await gitService.isRepo();
+            setIsRepo(hasRepo);
 
-            setStatus(statusData);
-            setCommits(commitsData);
-            setBranches(branchesData);
+            if (hasRepo) {
+                const [statusData, commitsData, branchesData] = await Promise.all([
+                    gitService.getStatus(),
+                    gitService.log(20),
+                    gitService.listBranches()
+                ]);
+
+                setStatus(statusData);
+                setCommits(commitsData);
+                setBranches(branchesData);
+            }
         } catch (error) {
             console.error('Failed to load git data:', error);
+            setIsRepo(false);
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleInit = async () => {
+        if (!gitService) return;
+        setIsLoading(true);
+        try {
+            await gitService.init();
+            await loadGitData();
+            showToast('Repository initialized', 'success');
+        } catch (error) {
+            showToast('Failed to initialize repository', 'error');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleShowDiff = async (filepath: string) => {
+        if (!gitService) return;
+        try {
+            const diff = await gitService.diff(filepath);
+            setSelectedDiff({ path: filepath, content: diff });
+        } catch (error) {
+            showToast('Failed to load diff', 'error');
         }
     };
 
@@ -60,6 +97,7 @@ export const GitPanel = () => {
             await gitService.add(filepath);
             await loadGitData();
             showToast('File staged', 'success');
+            window.dispatchEvent(new CustomEvent('git-changed'));
         } catch (error) {
             showToast('Failed to stage file', 'error');
         }
@@ -72,8 +110,36 @@ export const GitPanel = () => {
             await gitService.reset(filepath);
             await loadGitData();
             showToast('File unstaged', 'success');
+            window.dispatchEvent(new CustomEvent('git-changed'));
         } catch (error) {
             showToast('Failed to unstage file', 'error');
+        }
+    };
+
+    const handleUnstageAll = async () => {
+        if (!gitService) return;
+
+        try {
+            await gitService.unstageAll();
+            await loadGitData();
+            showToast('All files unstaged', 'success');
+        } catch (error) {
+            showToast('Failed to unstage all', 'error');
+        }
+    };
+
+    const handleDiscardChanges = async (filepath: string) => {
+        if (!gitService) return;
+
+        if (!confirm(`Are you sure you want to discard changes in ${filepath}? This cannot be undone.`)) return;
+
+        try {
+            await gitService.discardChanges(filepath);
+            await loadGitData();
+            showToast('Changes discarded', 'success');
+            window.dispatchEvent(new CustomEvent('git-changed'));
+        } catch (error) {
+            showToast('Failed to discard changes', 'error');
         }
     };
 
@@ -85,6 +151,7 @@ export const GitPanel = () => {
             await gitService.add(allFiles);
             await loadGitData();
             showToast('All files staged', 'success');
+            window.dispatchEvent(new CustomEvent('git-changed'));
         } catch (error) {
             showToast('Failed to stage files', 'error');
         }
@@ -98,6 +165,7 @@ export const GitPanel = () => {
             setCommitMessage('');
             await loadGitData();
             showToast('Changes committed', 'success');
+            window.dispatchEvent(new CustomEvent('git-changed'));
         } catch (error) {
             showToast('Failed to commit', 'error');
         }
@@ -118,12 +186,32 @@ export const GitPanel = () => {
     const handlePull = async () => {
         if (!gitService) return;
 
+        setIsLoading(true);
         try {
             await gitService.pull();
             await loadGitData();
             showToast('Pulled from remote', 'success');
-        } catch (error) {
-            showToast('Failed to pull', 'error');
+        } catch (error: any) {
+            showToast(`Pull failed: ${error.message}`, 'error');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSync = async () => {
+        if (!gitService) return;
+
+        setIsLoading(true);
+        try {
+            showToast('Syncing changes...', 'success');
+            await gitService.pull();
+            await gitService.push();
+            await loadGitData();
+            showToast('Repository synced successfully', 'success');
+        } catch (error: any) {
+            showToast(`Sync failed: ${error.message}`, 'error');
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -153,6 +241,20 @@ export const GitPanel = () => {
         }
     };
 
+    const handleDeleteBranch = async (branchName: string) => {
+        if (!gitService) return;
+
+        if (!confirm(`Are you sure you want to delete branch '${branchName}'?`)) return;
+
+        try {
+            await gitService.deleteBranch(branchName);
+            await loadGitData();
+            showToast(`Branch '${branchName}' deleted`, 'success');
+        } catch (error) {
+            showToast('Failed to delete branch', 'error');
+        }
+    };
+
     const showToast = (message: string, type: 'success' | 'error') => {
         const toast = document.createElement('div');
         toast.className = `fixed top-4 right-4 px-4 py-2 rounded text-sm z-50 ${type === 'success' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'
@@ -162,7 +264,7 @@ export const GitPanel = () => {
         setTimeout(() => toast.remove(), 3000);
     };
 
-    if (!gitService) {
+    if (isRepo === false) {
         return (
             <div className="h-full flex items-center justify-center bg-gradient-to-b from-gray-900/90 to-black/90 p-4">
                 <div className="text-center text-gray-500">
@@ -172,15 +274,12 @@ export const GitPanel = () => {
                         Initialize a Git repository to start tracking changes
                     </div>
                     <button
-                        onClick={async () => {
-                            if (gitService) {
-                                await gitService.init();
-                                await loadGitData();
-                            }
-                        }}
-                        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-mono text-sm"
+                        onClick={handleInit}
+                        disabled={isLoading}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-800 text-white rounded font-mono text-sm flex items-center space-x-2 mx-auto"
                     >
-                        Initialize Repository
+                        {isLoading ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />}
+                        <span>Initialize Repository</span>
                     </button>
                 </div>
             </div>
@@ -218,6 +317,13 @@ export const GitPanel = () => {
                         <Upload size={16} />
                     </button>
                     <button
+                        onClick={handleSync}
+                        className="p-1.5 hover:bg-gray-800 rounded text-gray-400 hover:text-purple-400"
+                        title="Sync (Pull & Push)"
+                    >
+                        <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+                    </button>
+                    <button
                         onClick={loadGitData}
                         className="p-1.5 hover:bg-gray-800 rounded text-gray-400 hover:text-gray-300"
                         title="Refresh"
@@ -234,8 +340,8 @@ export const GitPanel = () => {
                         key={tab}
                         onClick={() => setActiveTab(tab)}
                         className={`px-4 py-2 text-sm font-mono capitalize ${activeTab === tab
-                                ? 'text-red-400 border-b-2 border-red-500'
-                                : 'text-gray-500 hover:text-gray-300'
+                            ? 'text-red-400 border-b-2 border-red-500'
+                            : 'text-gray-500 hover:text-gray-300'
                             }`}
                     >
                         {tab}
@@ -275,24 +381,33 @@ export const GitPanel = () => {
                                     <div className="text-sm text-gray-400 font-mono">
                                         Staged Changes ({status.staged.length})
                                     </div>
+                                    <button
+                                        onClick={handleUnstageAll}
+                                        className="text-xs text-red-400 hover:text-red-300 font-mono flex items-center space-x-1"
+                                    >
+                                        <Undo2 size={12} />
+                                        <span>Unstage All</span>
+                                    </button>
                                 </div>
                                 <div className="space-y-1">
                                     {status.staged.map((file) => (
                                         <div
                                             key={file}
-                                            className="flex items-center justify-between p-2 bg-gray-900/50 rounded hover:bg-gray-900"
+                                            className="flex items-center justify-between p-2 bg-gray-900/50 rounded hover:bg-gray-900 group"
                                         >
                                             <div className="flex items-center space-x-2 flex-1 min-w-0">
                                                 <Check size={14} className="text-green-400 flex-shrink-0" />
                                                 <span className="text-gray-300 font-mono text-xs truncate">{file}</span>
                                             </div>
-                                            <button
-                                                onClick={() => handleUnstageFile(file)}
-                                                className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-red-400"
-                                                title="Unstage"
-                                            >
-                                                <X size={14} />
-                                            </button>
+                                            <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={() => handleUnstageFile(file)}
+                                                    className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-red-400"
+                                                    title="Unstage"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -317,19 +432,38 @@ export const GitPanel = () => {
                                     {status.modified.map((file) => (
                                         <div
                                             key={file}
-                                            className="flex items-center justify-between p-2 bg-gray-900/50 rounded hover:bg-gray-900"
+                                            className="flex items-center justify-between p-2 bg-gray-900/50 rounded hover:bg-gray-900 group"
                                         >
-                                            <div className="flex items-center space-x-2 flex-1 min-w-0">
+                                            <div
+                                                className="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer"
+                                                onClick={() => handleShowDiff(file)}
+                                            >
                                                 <FileText size={14} className="text-yellow-400 flex-shrink-0" />
                                                 <span className="text-gray-300 font-mono text-xs truncate">{file}</span>
                                             </div>
-                                            <button
-                                                onClick={() => handleStageFile(file)}
-                                                className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-green-400"
-                                                title="Stage"
-                                            >
-                                                <Plus size={14} />
-                                            </button>
+                                            <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleShowDiff(file); }}
+                                                    className="p-1 hover:bg-gray-800 rounded text-gray-400"
+                                                    title="View Diff"
+                                                >
+                                                    <Search size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleDiscardChanges(file); }}
+                                                    className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-red-400"
+                                                    title="Discard Changes"
+                                                >
+                                                    <RotateCcw size={14} />
+                                                </button>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleStageFile(file); }}
+                                                    className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-green-400"
+                                                    title="Stage"
+                                                >
+                                                    <Plus size={14} />
+                                                </button>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -421,8 +555,8 @@ export const GitPanel = () => {
                                 <div
                                     key={branch.name}
                                     className={`flex items-center justify-between p-3 rounded ${branch.current
-                                            ? 'bg-red-900/20 border border-red-900/30'
-                                            : 'bg-gray-900/50 hover:bg-gray-900'
+                                        ? 'bg-red-900/20 border border-red-900/30'
+                                        : 'bg-gray-900/50 hover:bg-gray-900'
                                         }`}
                                 >
                                     <div className="flex items-center space-x-2">
@@ -438,14 +572,26 @@ export const GitPanel = () => {
                                             <span className="text-xs text-gray-500">(current)</span>
                                         )}
                                     </div>
-                                    {!branch.current && (
-                                        <button
-                                            onClick={() => handleCheckoutBranch(branch.name)}
-                                            className="text-xs text-gray-500 hover:text-gray-300 font-mono"
-                                        >
-                                            Checkout
-                                        </button>
-                                    )}
+                                    <div className="flex items-center space-x-2">
+                                        {!branch.current && (
+                                            <>
+                                                <button
+                                                    onClick={() => handleCheckoutBranch(branch.name)}
+                                                    className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-blue-400 font-mono text-xs"
+                                                    title="Checkout"
+                                                >
+                                                    Checkout
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteBranch(branch.name)}
+                                                    className="p-1 hover:bg-gray-800 rounded text-gray-500 hover:text-red-400"
+                                                    title="Delete Branch"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -482,6 +628,68 @@ export const GitPanel = () => {
                                 className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded font-mono text-sm"
                             >
                                 Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Diff Overlay */}
+            {selectedDiff && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-8">
+                    <div className="bg-gray-900 border border-gray-800 rounded-lg w-full max-w-4xl h-full max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
+                        <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-900/50">
+                            <div className="flex items-center space-x-3">
+                                <FileText size={18} className="text-yellow-400" />
+                                <span className="text-gray-200 font-mono text-sm font-semibold">{selectedDiff.path}</span>
+                            </div>
+                            <button
+                                onClick={() => setSelectedDiff(null)}
+                                className="p-2 hover:bg-gray-800 rounded-full text-gray-500 hover:text-white transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-auto p-6 font-mono text-sm bg-gray-950">
+                            {selectedDiff.content.split('\n').map((line, i) => {
+                                let bgColor = '';
+                                let textColor = 'text-gray-400';
+                                if (line.startsWith('+')) {
+                                    bgColor = 'bg-green-900/20';
+                                    textColor = 'text-green-400';
+                                } else if (line.startsWith('-')) {
+                                    bgColor = 'bg-red-900/20';
+                                    textColor = 'text-red-400';
+                                } else if (line.startsWith(' ')) {
+                                    textColor = 'text-gray-500';
+                                }
+
+                                return (
+                                    <div key={i} className={`whitespace-pre px-4 py-0.5 rounded ${bgColor} ${textColor}`}>
+                                        <span className="w-8 inline-block opacity-30 select-none text-right mr-4">{i + 1}</span>
+                                        {line}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <div className="px-6 py-4 border-t border-gray-800 bg-gray-900/50 flex justify-end space-x-3">
+                            <button
+                                onClick={() => {
+                                    handleDiscardChanges(selectedDiff.path);
+                                    setSelectedDiff(null);
+                                }}
+                                className="px-4 py-2 bg-gray-800 hover:bg-red-900/40 text-gray-300 hover:text-red-300 rounded font-mono text-xs transition-all"
+                            >
+                                Discard Changes
+                            </button>
+                            <button
+                                onClick={() => {
+                                    handleStageFile(selectedDiff.path);
+                                    setSelectedDiff(null);
+                                }}
+                                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded font-mono text-xs transition-all"
+                            >
+                                Stage Changes
                             </button>
                         </div>
                     </div>

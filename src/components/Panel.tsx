@@ -15,7 +15,6 @@ export const Panel = ({
   title,
   children,
   className = '',
-  glowColor = 'red',
   isActive = false,
   onClick,
   onCollapse,
@@ -23,49 +22,28 @@ export const Panel = ({
 }: PanelProps) => {
   const [isHovered, setIsHovered] = useState(false);
 
-  const glowColors = {
-    red: {
-      shadow: 'shadow-[0_0_30px_rgba(239,68,68,0.3)]',
-      hoverShadow: 'shadow-[0_0_50px_rgba(239,68,68,0.5)]',
-    },
-    blue: {
-      shadow: 'shadow-[0_0_30px_rgba(59,130,246,0.3)]',
-      hoverShadow: 'shadow-[0_0_50px_rgba(59,130,246,0.5)]',
-    },
-    green: {
-      shadow: 'shadow-[0_0_30px_rgba(34,197,94,0.3)]',
-      hoverShadow: 'shadow-[0_0_50px_rgba(34,197,94,0.5)]',
-    },
-  };
-
-  const borderColors = {
-    red: 'border-red-900/50',
-    blue: 'border-blue-900/50',
-    green: 'border-green-900/50',
-  };
-
-  const selectedGlow = glowColors[glowColor as keyof typeof glowColors] || glowColors.red;
-  const selectedBorder = borderColors[glowColor as keyof typeof borderColors] || borderColors.red;
 
   return (
     <div
-      className={`panel-3d backdrop-blur-xl bg-gradient-to-br from-black/90 to-black/70 border ${selectedBorder} rounded-none overflow-hidden transition-all duration-300 ${isHovered || isActive ? selectedGlow.hoverShadow : selectedGlow.shadow
-        } ${isActive ? 'ring-1 ring-red-500/50' : ''} ${className}`}
+      className={`panel-3d backdrop-blur-xl bg-gradient-to-br from-[#0a0a0a]/90 to-black/70 border border-theme rounded-none overflow-hidden transition-all duration-300 relative group ${className}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={onClick}
       style={{
         transform: 'translateZ(0)',
+        boxShadow: isHovered || isActive ? '0 0 30px var(--border-primary)' : '0 0 15px var(--border-primary)'
       }}
     >
-      <div className="panel-header bg-gradient-to-r from-gray-900/50 to-black/50 border-b border-red-900/30 px-4 py-2.5 flex items-center justify-between backdrop-blur-md">
-        <div className="flex items-center space-x-3">
-          <div className={`w-3 h-3 rounded-full animate-pulse transition-all ${isHovered
-            ? 'bg-red-400 shadow-[0_0_15px_rgba(239,68,68,1)]'
-            : 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)]'
-            }`}></div>
-          <span className={`text-red-400 font-mono text-sm tracking-wider transition-colors ${isHovered ? 'text-red-300' : ''
-            }`}>{title}</span>
+      <div className="panel-header bg-theme-secondary/50 border-b border-theme px-4 py-2.5 flex items-center justify-between backdrop-blur-md relative overflow-hidden">
+        <div className="absolute inset-0 bg-theme-accent opacity-[0.03] pointer-events-none"></div>
+        <div className="flex items-center space-x-3 relative z-10">
+          <div
+            className="w-2.5 h-2.5 rounded-full animate-pulse transition-all bg-theme-accent"
+            style={{ boxShadow: `0 0 10px var(--accent-primary)` }}
+          ></div>
+          <span className="text-theme-accent font-bold font-mono text-xs tracking-widest uppercase transition-colors">
+            {title}
+          </span>
         </div>
 
         {/* Center Content */}

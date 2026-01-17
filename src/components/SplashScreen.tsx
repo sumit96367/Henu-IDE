@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useOS } from '../context/OSContext';
 
 export const SplashScreen = () => {
-  const { setPhase } = useOS();
+  // Phase is managed by App.tsx, this component just shows the animation
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('INITIALIZING');
   const [ringRotation, setRingRotation] = useState(0);
@@ -27,13 +26,9 @@ export const SplashScreen = () => {
       }, delay);
     });
 
-    setTimeout(() => {
-      setPhase('ready');
-      clearInterval(ringInterval);
-    }, 2000);
-
+    // Cleanup on unmount
     return () => clearInterval(ringInterval);
-  }, [setPhase]);
+  }, []);
 
   return (
     <div className="fixed inset-0 bg-black z-50 flex items-center justify-center overflow-hidden">

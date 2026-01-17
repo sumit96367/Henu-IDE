@@ -3,20 +3,85 @@
 // In production, you'd want to use LightningFS or BrowserFS
 
 export class SimpleFS {
-    private files: Map<string, string> = new Map();
+    private files: Map<string, string | Uint8Array> = new Map();
+    private directories: Set<string> = new Set();
+
+    constructor() {
+        // Initialize with default directories
+        this.addDirectory('/');
+        this.addDirectory('/workspace');
+    }
+
+    private normalizePath(path: string): string {
+        if (!path) return '/';
+        // Replace backslashes with forward slashes
+        let normalized = path.replace(/\\/g, '/');
+
+        // Ensure it starts with a / if it doesn't look like a drive letter path
+        // but isomorphic-git often uses absolute paths provided in 'dir'
+        // If it starts with a drive letter, keep it but use forward slashes
+
+        // Remove trailing slash except for root
+        if (normalized.length > 1 && normalized.endsWith('/')) {
+            normalized = normalized.slice(0, -1);
+        }
+        return normalized;
+    }
+
+    private throwError(code: string, path: string, normalized?: string) {
+        const error = new Error(`${code}: no such file or directory, ${path}${normalized ? ` (normalized: ${normalized})` : ''}`) as any;
+        error.code = code;
+        error.path = path;
+        throw error;
+    }
+
+    private addDirectory(path: string) {
+        const normalized = this.normalizePath(path);
+        const parts = normalized.split('/');
+        let current = '';
+        for (const part of parts) {
+            if (part === '') {
+                if (current === '') current = '/';
+                else continue;
+            } else {
+                // If current is / and part starts, don't double slash
+                if (current === '/') current = '/' + part;
+                else if (current.includes(':') && !current.includes('/')) current = current + '/' + part; // handle E: -> E:/
+                else current += (current ? '/' : '') + part;
+            }
+            if (current) this.directories.add(current);
+        }
+    }
 
     promises = {
         readFile: async (path: string, encoding?: string): Promise<string | Buffer> => {
-            const content = this.files.get(path);
-            if (!content) {
-                throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+            const normalized = this.normalizePath(path);
+            const content = this.files.get(normalized);
+            if (content === undefined) {
+                this.throwError('ENOENT', path, normalized);
             }
-            return encoding === 'utf8' ? content : Buffer.from(content);
+            return encoding === 'utf8' ? (content as any) : (typeof content === 'string' ? Buffer.from(content) : content as any);
         },
 
-        writeFile: async (path: string, data: string | Buffer): Promise<void> => {
-            const content = typeof data === 'string' ? data : data.toString();
-            this.files.set(path, content);
+        writeFile: async (path: string, data: any): Promise<void> => {
+            const normalized = this.normalizePath(path);
+            let content: string | Uint8Array;
+            if (typeof data === 'string') {
+                content = data;
+            } else if (data instanceof Uint8Array) {
+                content = data;
+            } else {
+                content = data.toString();
+            }
+            this.files.set(normalized, content as any);
+
+            // Ensure parent directories exist
+            const lastSlash = normalized.lastIndexOf('/');
+            if (lastSlash > 0) {
+                this.addDirectory(normalized.substring(0, lastSlash));
+            } else if (lastSlash === 0) {
+                this.directories.add('/');
+            }
         },
 
         unlink: async (path: string): Promise<void> => {
@@ -24,16 +89,43 @@ export class SimpleFS {
         },
 
         readdir: async (path: string): Promise<string[]> => {
-            const prefix = path.endsWith('/') ? path : `${path}/`;
-            const files = Array.from(this.files.keys())
-                .filter(f => f.startsWith(prefix))
-                .map(f => f.substring(prefix.length).split('/')[0])
-                .filter((v, i, a) => a.indexOf(v) === i);
-            return files;
+            const normalized = this.normalizePath(path);
+            const prefix = normalized === '/' ? '/' : `${normalized}/`;
+            const entries = new Set<string>();
+
+            // Add files
+            for (const f of this.files.keys()) {
+                if (f.startsWith(prefix)) {
+                    const rest = f.substring(prefix.length);
+                    const firstPart = rest.split('/')[0];
+                    if (firstPart) entries.add(firstPart);
+                }
+            }
+
+            // Add directories
+            for (const d of this.directories) {
+                if (d.startsWith(prefix) && d !== normalized) {
+                    const rest = d.substring(prefix.length);
+                    const firstPart = rest.split('/')[0];
+                    if (firstPart) entries.add(firstPart);
+                }
+            }
+
+            return Array.from(entries);
         },
 
-        mkdir: async (path: string): Promise<void> => {
-            // No-op for in-memory FS
+        mkdir: async (path: string, options?: { recursive?: boolean }): Promise<void> => {
+            const normalized = this.normalizePath(path);
+            if (options?.recursive) {
+                this.addDirectory(normalized);
+            } else {
+                this.directories.add(normalized);
+                // Also ensure parent exists
+                const lastSlash = normalized.lastIndexOf('/');
+                if (lastSlash > 0) {
+                    this.addDirectory(normalized.substring(0, lastSlash));
+                }
+            }
         },
 
         rmdir: async (path: string): Promise<void> => {
@@ -44,92 +136,219 @@ export class SimpleFS {
         },
 
         stat: async (path: string): Promise<any> => {
-            const exists = this.files.has(path);
-            if (!exists) {
-                // Check if it's a directory
-                const prefix = path.endsWith('/') ? path : `${path}/`;
-                const hasChildren = Array.from(this.files.keys()).some(f => f.startsWith(prefix));
-                if (!hasChildren) {
-                    throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
-                }
-                return { isDirectory: () => true, isFile: () => false };
+            const normalized = this.normalizePath(path);
+            const now = Date.now();
+
+            // Check if it's a file
+            const fileContent = this.files.get(normalized);
+            if (fileContent !== undefined) {
+                return {
+                    isDirectory: () => false,
+                    isFile: () => true,
+                    isSymbolicLink: () => false,
+                    size: typeof fileContent === 'string' ? fileContent.length : (fileContent as any).length || 0,
+                    mtimeMs: now,
+                    ctimeMs: now,
+                    birthtimeMs: now,
+                    mode: 0o644
+                };
             }
-            return { isDirectory: () => false, isFile: () => true };
+
+            // Check if it's a directory
+            if (this.directories.has(normalized)) {
+                return {
+                    isDirectory: () => true,
+                    isFile: () => false,
+                    isSymbolicLink: () => false,
+                    size: 0,
+                    mtimeMs: now,
+                    ctimeMs: now,
+                    birthtimeMs: now,
+                    mode: 0o755
+                };
+            }
+
+            // Check if any files/dirs have this as prefix
+            const prefix = normalized === '/' ? '/' : `${normalized}/`;
+            const hasChildren = Array.from(this.files.keys()).some(f => f.startsWith(prefix)) ||
+                Array.from(this.directories).some(d => d.startsWith(prefix) && d !== normalized);
+
+            if (hasChildren) {
+                this.directories.add(normalized);
+                return {
+                    isDirectory: () => true,
+                    isFile: () => false,
+                    isSymbolicLink: () => false,
+                    size: 0,
+                    mtimeMs: now,
+                    ctimeMs: now,
+                    birthtimeMs: now,
+                    mode: 0o755
+                };
+            }
+
+            this.throwError('ENOENT', path, normalized);
         },
 
         lstat: async (path: string): Promise<any> => {
             return this.promises.stat(path);
         },
 
-        readlink: async (path: string): Promise<string> => {
+        readlink: async (_path: string): Promise<string> => {
             throw new Error('Symlinks not supported');
         },
 
-        symlink: async (target: string, path: string): Promise<void> => {
+        symlink: async (_target: string, _path: string): Promise<void> => {
             throw new Error('Symlinks not supported');
         },
 
-        chmod: async (path: string, mode: number): Promise<void> => {
+        chmod: async (_path: string, _mode: number): Promise<void> => {
             // No-op
         },
     };
 
     // Synchronous methods (for compatibility)
     readFileSync(path: string, encoding?: string): string | Buffer {
-        const content = this.files.get(path);
-        if (!content) {
-            throw new Error(`ENOENT: no such file or directory, open '${path}'`);
+        const normalized = this.normalizePath(path);
+        const content = this.files.get(normalized);
+        if (content === undefined) {
+            this.throwError('ENOENT', path, normalized);
         }
-        return encoding === 'utf8' ? content : Buffer.from(content);
+        return encoding === 'utf8' ? (content as any) : (typeof content === 'string' ? Buffer.from(content) : content as any);
     }
 
-    writeFileSync(path: string, data: string | Buffer): void {
-        const content = typeof data === 'string' ? data : data.toString();
-        this.files.set(path, content);
+    writeFileSync(path: string, data: any): void {
+        const normalized = this.normalizePath(path);
+        let content: string | Uint8Array;
+        if (typeof data === 'string') {
+            content = data;
+        } else if (data instanceof Uint8Array) {
+            content = data;
+        } else {
+            content = data.toString();
+        }
+        this.files.set(normalized, content as any);
+
+        // Ensure parent directories exist
+        const lastSlash = normalized.lastIndexOf('/');
+        if (lastSlash > 0) {
+            this.addDirectory(normalized.substring(0, lastSlash));
+        } else if (lastSlash === 0) {
+            this.directories.add('/');
+        }
     }
 
     existsSync(path: string): boolean {
-        return this.files.has(path);
+        const normalized = this.normalizePath(path);
+        return this.files.has(normalized) || this.directories.has(normalized);
     }
 
     readdirSync(path: string): string[] {
-        const prefix = path.endsWith('/') ? path : `${path}/`;
-        const files = Array.from(this.files.keys())
-            .filter(f => f.startsWith(prefix))
-            .map(f => f.substring(prefix.length).split('/')[0])
-            .filter((v, i, a) => a.indexOf(v) === i);
-        return files;
+        const normalized = this.normalizePath(path);
+        const prefix = normalized === '/' ? '/' : `${normalized}/`;
+        const entries = new Set<string>();
+
+        // Add files
+        for (const f of this.files.keys()) {
+            if (f.startsWith(prefix)) {
+                const rest = f.substring(prefix.length);
+                const firstPart = rest.split('/')[0];
+                if (firstPart) entries.add(firstPart);
+            }
+        }
+
+        // Add directories
+        for (const d of this.directories) {
+            if (d.startsWith(prefix) && d !== normalized) {
+                const rest = d.substring(prefix.length);
+                const firstPart = rest.split('/')[0];
+                if (firstPart) entries.add(firstPart);
+            }
+        }
+
+        return Array.from(entries);
     }
 
     statSync(path: string): any {
-        const exists = this.files.has(path);
-        if (!exists) {
-            const prefix = path.endsWith('/') ? path : `${path}/`;
-            const hasChildren = Array.from(this.files.keys()).some(f => f.startsWith(prefix));
-            if (!hasChildren) {
-                throw new Error(`ENOENT: no such file or directory, stat '${path}'`);
-            }
-            return { isDirectory: () => true, isFile: () => false };
+        const normalized = this.normalizePath(path);
+        const now = Date.now();
+
+        const fileContent = this.files.get(normalized);
+        if (fileContent !== undefined) {
+            return {
+                isDirectory: () => false,
+                isFile: () => true,
+                isSymbolicLink: () => false,
+                size: typeof fileContent === 'string' ? fileContent.length : (fileContent as any).length || 0,
+                mtimeMs: now,
+                ctimeMs: now,
+                birthtimeMs: now,
+                mode: 0o644
+            };
         }
-        return { isDirectory: () => false, isFile: () => true };
+
+        if (this.directories.has(normalized)) {
+            return {
+                isDirectory: () => true,
+                isFile: () => false,
+                isSymbolicLink: () => false,
+                size: 0,
+                mtimeMs: now,
+                ctimeMs: now,
+                birthtimeMs: now,
+                mode: 0o755
+            };
+        }
+
+        const prefix = normalized === '/' ? '/' : `${normalized}/`;
+        const hasChildren = Array.from(this.files.keys()).some(f => f.startsWith(prefix)) ||
+            Array.from(this.directories).some(d => d.startsWith(prefix) && d !== normalized);
+
+        if (hasChildren) {
+            this.directories.add(normalized);
+            return {
+                isDirectory: () => true,
+                isFile: () => false,
+                isSymbolicLink: () => false,
+                size: 0,
+                mtimeMs: now,
+                ctimeMs: now,
+                birthtimeMs: now,
+                mode: 0o755
+            };
+        }
+
+        this.throwError('ENOENT', path, normalized);
     }
 
     lstatSync(path: string): any {
         return this.statSync(path);
     }
 
-    mkdirSync(path: string): void {
-        // No-op
+    mkdirSync(path: string, options?: { recursive?: boolean }): void {
+        const normalized = this.normalizePath(path);
+        if (options?.recursive) {
+            this.addDirectory(normalized);
+        } else {
+            this.directories.add(normalized);
+            const lastSlash = normalized.lastIndexOf('/');
+            if (lastSlash > 0) {
+                this.addDirectory(normalized.substring(0, lastSlash));
+            }
+        }
     }
 
     rmdirSync(path: string): void {
-        const prefix = path.endsWith('/') ? path : `${path}/`;
+        const normalized = this.normalizePath(path);
+        const prefix = normalized === '/' ? '/' : `${normalized}/`;
         const toDelete = Array.from(this.files.keys()).filter(f => f.startsWith(prefix));
         toDelete.forEach(f => this.files.delete(f));
+        this.directories.delete(normalized);
     }
 
     unlinkSync(path: string): void {
-        this.files.delete(path);
+        const normalized = this.normalizePath(path);
+        this.files.delete(normalized);
     }
 }
 

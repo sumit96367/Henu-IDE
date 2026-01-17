@@ -23,6 +23,7 @@ interface TerminalHistoryItem {
   command: string;
   output: string;
   timestamp: Date;
+  isError?: boolean;
 }
 
 interface AIMessage {
@@ -39,11 +40,12 @@ interface OSState {
   fileSystem: FileSystemNode[];
   currentPath: string;
   openTabs: FileSystemNode[];
+  outputMessages: { message: string; type: 'info' | 'success' | 'error' | 'warning'; timestamp: Date }[];
 }
 
 type OSAction =
   | { type: 'SET_ACTIVE_FILE'; payload: FileSystemNode | null }
-  | { type: 'ADD_TERMINAL_COMMAND'; payload: { command: string; output: string } }
+  | { type: 'ADD_TERMINAL_COMMAND'; payload: { command: string; output: string; isError?: boolean } }
   | { type: 'CLEAR_TERMINAL' }
   | { type: 'ADD_AI_MESSAGE'; payload: { role: 'user' | 'assistant'; content: string } }
   | { type: 'CLEAR_AI_MESSAGES' }
@@ -57,7 +59,9 @@ type OSAction =
   | { type: 'MOVE_NODE'; payload: { nodeId: string; targetParentId: string } }
   | { type: 'OPEN_TAB'; payload: FileSystemNode }
   | { type: 'CLOSE_TAB'; payload: string }
-  | { type: 'CLOSE_ALL_TABS' };
+  | { type: 'CLOSE_ALL_TABS' }
+  | { type: 'ADD_OUTPUT_MESSAGE'; payload: { message: string; type: 'info' | 'success' | 'error' | 'warning' } }
+  | { type: 'CLEAR_OUTPUT' };
 
 // Enhanced Initial State
 const initialFileSystem: FileSystemNode[] = [
@@ -200,6 +204,7 @@ const initialState: OSState = {
   fileSystem: initialFileSystem,
   currentPath: '/home/user',
   openTabs: [],
+  outputMessages: [],
 };
 
 // Enhanced Reducer
@@ -216,6 +221,7 @@ const osReducer = (state: OSState, action: OSAction): OSState => {
           {
             command: action.payload.command,
             output: action.payload.output,
+            isError: action.payload.isError,
             timestamp: new Date(),
           },
         ],
@@ -525,6 +531,27 @@ const osReducer = (state: OSState, action: OSAction): OSState => {
       };
     }
 
+    case 'ADD_OUTPUT_MESSAGE': {
+      return {
+        ...state,
+        outputMessages: [
+          ...state.outputMessages,
+          {
+            message: action.payload.message,
+            type: action.payload.type,
+            timestamp: new Date(),
+          },
+        ],
+      };
+    }
+
+    case 'CLEAR_OUTPUT': {
+      return {
+        ...state,
+        outputMessages: [],
+      };
+    }
+
     default:
       return state;
   }
@@ -534,7 +561,7 @@ const osReducer = (state: OSState, action: OSAction): OSState => {
 interface OSContextType {
   state: OSState;
   dispatch: React.Dispatch<OSAction>;
-  addTerminalCommand: (command: string, output: string) => void;
+  addTerminalCommand: (command: string, output: string, isError?: boolean) => void;
   clearTerminal: () => void;
   addAIMessage: (role: 'user' | 'assistant', content: string) => void;
   clearAIMessages: () => void;
@@ -558,6 +585,8 @@ interface OSContextType {
   openTab: (file: FileSystemNode) => void;
   closeTab: (fileId: string) => void;
   closeAllTabs: () => void;
+  addOutputMessage: (message: string, type?: 'info' | 'success' | 'error' | 'warning') => void;
+  clearOutput: () => void;
 }
 
 const OSContext = createContext<OSContextType | undefined>(undefined);
@@ -573,18 +602,18 @@ export const OSProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         const { initGitService } = await import('../services/GitService');
         const { getSimpleFS } = await import('../services/SimpleFS');
         const fs = getSimpleFS();
-        const gitService = initGitService(fs, '/workspace');
-        console.log('Git service initialized');
+        initGitService(fs, state.currentPath || '/workspace');
+        console.log('Git service initialized for:', state.currentPath || '/workspace');
       } catch (error) {
         console.error('Failed to initialize Git:', error);
       }
     };
     initGit();
-  }, []);
+  }, [state.currentPath]);
 
   // Helper functions
-  const addTerminalCommand = (command: string, output: string) => {
-    dispatch({ type: 'ADD_TERMINAL_COMMAND', payload: { command, output } });
+  const addTerminalCommand = (command: string, output: string, isError?: boolean) => {
+    dispatch({ type: 'ADD_TERMINAL_COMMAND', payload: { command, output, isError } });
   };
 
   const clearTerminal = () => {
@@ -750,6 +779,14 @@ export const OSProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     dispatch({ type: 'CLOSE_ALL_TABS' });
   };
 
+  const addOutputMessage = (message: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
+    dispatch({ type: 'ADD_OUTPUT_MESSAGE', payload: { message, type } });
+  };
+
+  const clearOutput = () => {
+    dispatch({ type: 'CLEAR_OUTPUT' });
+  };
+
   // Context value
   const contextValue: OSContextType = {
     state,
@@ -778,6 +815,8 @@ export const OSProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     openTab,
     closeTab,
     closeAllTabs,
+    addOutputMessage,
+    clearOutput,
   };
 
   return (

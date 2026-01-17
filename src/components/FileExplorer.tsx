@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useOS } from '../context/OSContext';
+import { getGitService } from '../services/GitService';
 import {
   FolderIcon, FileIcon, ChevronRight, ChevronDown,
   Plus, FolderPlus, Trash2, Edit3, Copy, Download,
@@ -55,6 +56,8 @@ export const FileExplorer = () => {
   const [multiSelect, setMultiSelect] = useState<Set<string>>(new Set());
   const [clipboard, setClipboard] = useState<{ type: 'cut' | 'copy', node: any } | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<string[]>([]);
+  const [gitStatus, setGitStatus] = useState<Map<string, string>>(new Map());
+  const [isRepo, setIsRepo] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
@@ -97,6 +100,42 @@ export const FileExplorer = () => {
 
     setExpanded(newExpanded);
   }, [state.currentPath]);
+
+  // Load Git status
+  const loadGitStatus = useCallback(async () => {
+    const gitService = getGitService();
+    if (!gitService) return;
+
+    try {
+      const hasRepo = await gitService.isRepo();
+      setIsRepo(hasRepo);
+      if (hasRepo) {
+        const status = await gitService.getStatus();
+        const statusMap = new Map<string, string>();
+
+        status.modified.forEach(file => statusMap.set(file, 'M'));
+        status.staged.forEach(file => statusMap.set(file, 'A'));
+        status.untracked.forEach(file => statusMap.set(file, '?'));
+
+        setGitStatus(statusMap);
+      } else {
+        setGitStatus(new Map());
+      }
+    } catch (error) {
+      console.error('Failed to load git status:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadGitStatus();
+  }, [state.fileSystem, loadGitStatus]);
+
+  // Listen for custom 'git-changed' events if any
+  useEffect(() => {
+    const handleGitChange = () => loadGitStatus();
+    window.addEventListener('git-changed', handleGitChange);
+    return () => window.removeEventListener('git-changed', handleGitChange);
+  }, [loadGitStatus]);
 
   // Update selected node when active file changes
   useEffect(() => {
@@ -682,16 +721,22 @@ export const FileExplorer = () => {
   };
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' | 'warning') => {
-    const colors = {
-      success: 'bg-green-900 text-green-300',
-      error: 'bg-red-900 text-red-300',
-      info: 'bg-blue-900 text-blue-300',
-      warning: 'bg-yellow-900 text-yellow-300'
-    };
+    const themeBg = 'bg-theme-secondary';
+    const themeBorder = 'border-theme';
+    const accentColor = 'var(--accent-primary)';
 
     const toast = document.createElement('div');
-    toast.className = `fixed top-4 right-4 ${colors[type]} px-4 py-2 rounded-lg text-sm z-50 shadow-lg animate-slideIn`;
-    toast.textContent = message;
+    toast.className = `fixed top-4 right-4 ${themeBg} border ${themeBorder} px-4 py-2 rounded-lg text-sm z-50 shadow-2xl animate-slideIn flex items-center space-x-3`;
+    toast.style.color = 'var(--text-primary)';
+
+    // Add dot
+    const dot = document.createElement('div');
+    dot.className = 'w-2 h-2 rounded-full';
+    dot.style.backgroundColor = type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : 'var(--accent-primary)';
+    dot.style.boxShadow = `0 0 10px ${dot.style.backgroundColor}`;
+
+    toast.prepend(dot);
+    toast.textContent = ` ${message}`;
     document.body.appendChild(toast);
 
     setTimeout(() => {
@@ -760,14 +805,14 @@ export const FileExplorer = () => {
             setDragOverNode(null);
           }}
           className={`flex items-center space-x-2 px-2 py-1.5 cursor-pointer transition-all group ${isSelected
-            ? 'bg-blue-900/40 border-l-2 border-blue-500'
+            ? 'bg-theme-accent/20 border-l-2 border-theme-accent'
             : isActiveFile
-              ? 'bg-blue-900/30 border-l-2 border-blue-500'
+              ? 'bg-theme-accent/10 border-l-2 border-theme-accent'
               : isDraggedOver
-                ? 'bg-blue-900/30 border-2 border-blue-500 border-dashed'
+                ? 'bg-theme-accent/10 border-2 border-theme-accent border-dashed'
                 : isDragging
                   ? 'opacity-50'
-                  : 'hover:bg-gray-800/30'
+                  : 'hover:bg-white/5'
             } ${node.name.startsWith('.') ? 'opacity-60' : ''}`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={(e) => handleFileClick(node, e)}
@@ -821,6 +866,21 @@ export const FileExplorer = () => {
                 }`}>
                 {node.name}
                 {isActiveFile && <span className="text-xs text-blue-400 animate-pulse">●</span>}
+
+                {/* Git Status Indicator */}
+                {(() => {
+                  const status = gitStatus.get(nodePath.startsWith('/') ? nodePath.substring(1) : nodePath);
+                  if (!status) return null;
+                  return (
+                    <span className={`text-[10px] ml-1.5 px-1 rounded-sm font-bold ${status === 'M' ? 'bg-yellow-500/20 text-yellow-400' :
+                        status === 'A' ? 'bg-green-500/20 text-green-400' :
+                          'bg-gray-500/20 text-gray-400'
+                      }`}>
+                      {status === '?' ? 'U' : status}
+                    </span>
+                  );
+                })()}
+
                 {node.name.startsWith('.') && <span className="text-xs text-gray-500 ml-1">(hidden)</span>}
                 {node.locked && <Lock size={10} className="text-gray-500" />}
               </span>

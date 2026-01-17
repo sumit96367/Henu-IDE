@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useOS } from '../context/OSContext';
-import { 
-  Send, Zap, Bug, Info, RefreshCw, Sparkles, 
+import {
+  Send, Zap, Bug, Info, RefreshCw, Sparkles,
   Code, Terminal, FileCode, Cpu, Brain, Wrench,
   ChevronDown, Copy, Check, ThumbsUp, ThumbsDown,
   Globe, Server, Wifi, WifiOff
@@ -51,17 +51,17 @@ export const AIAgent = () => {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         setAvailableModels(data.models || []);
         setOllamaStatus('connected');
-        
+
         // अगर selected model available नहीं है, तो पहला available model select करें
-        const modelExists = data.models?.some((model: OllamaModel) => 
+        const modelExists = data.models?.some((model: OllamaModel) =>
           model.name.includes(selectedModel.split(':')[0])
         );
-        
+
         if (!modelExists && data.models?.length > 0) {
           setSelectedModel(data.models[0].name);
         }
@@ -115,10 +115,10 @@ User query: ${userMessage}`;
       }
 
       const data = await response.json();
-      
+
       // रिस्पॉन्स को पार्स करें
       const aiResponse = data.response;
-      
+
       // रिस्पॉन्स टाइप डिटेक्ट करें
       if (aiResponse.toLowerCase().includes('error') || aiResponse.toLowerCase().includes('bug')) {
         return {
@@ -126,10 +126,10 @@ User query: ${userMessage}`;
           content: aiResponse
         };
       } else if (
-        aiResponse.includes('```') || 
-        aiResponse.includes('function') || 
-        aiResponse.includes('const ') || 
-        aiResponse.includes('let ') || 
+        aiResponse.includes('```') ||
+        aiResponse.includes('function') ||
+        aiResponse.includes('const ') ||
+        aiResponse.includes('let ') ||
         aiResponse.includes('var ')
       ) {
         return {
@@ -138,7 +138,7 @@ User query: ${userMessage}`;
           language: 'javascript'
         };
       } else if (
-        aiResponse.toLowerCase().includes('explain') || 
+        aiResponse.toLowerCase().includes('explain') ||
         aiResponse.toLowerCase().includes('means') ||
         aiResponse.toLowerCase().includes('how ')
       ) {
@@ -168,11 +168,11 @@ User query: ${userMessage}`;
 
     try {
       const aiResponse = await generateAIResponse(userMessage);
-      
+
       // AI रिस्पॉन्स को फॉर्मेट करें
       let formattedResponse = '';
-      
-      switch(aiResponse.type) {
+
+      switch (aiResponse.type) {
         case 'code':
           formattedResponse = `💻 **Code Suggestion**\n\n\`\`\`${aiResponse.language || 'javascript'}\n${aiResponse.content}\n\`\`\``;
           if (aiResponse.suggestions) {
@@ -188,9 +188,9 @@ User query: ${userMessage}`;
         default:
           formattedResponse = `🤖 **AI Assistant**\n\n${aiResponse.content}`;
       }
-      
+
       formattedResponse += `\n\n---\n*Model: ${selectedModel} | Temp: ${temperature}*`;
-      
+
       addAIMessage('assistant', formattedResponse);
     } catch (error) {
       addAIMessage('assistant', '❌ Error connecting to Ollama. Make sure Ollama is running locally with:\n```bash\nollama serve\n```\nAnd the model is pulled:\n```bash\nollama pull qwen2.5:3b\n```');
@@ -207,11 +207,11 @@ User query: ${userMessage}`;
 
     addAIMessage('user', action);
     setIsProcessing(true);
-    
+
     try {
       let prompt = '';
-      
-      switch(action) {
+
+      switch (action) {
         case 'Optimize Code':
           prompt = 'Optimize this code for better performance and readability. Provide only the optimized code with comments.';
           break;
@@ -233,26 +233,26 @@ User query: ${userMessage}`;
 
       const aiResponse = await generateAIResponse(prompt);
       let formattedResponse = '';
-      
-      switch(aiResponse.type) {
+
+      switch (aiResponse.type) {
         case 'code':
           formattedResponse = `🚀 **${action}**\n\n\`\`\`${aiResponse.language || 'javascript'}\n${aiResponse.content}\n\`\`\``;
           break;
         default:
           formattedResponse = `🚀 **${action}**\n\n${aiResponse.content}`;
       }
-      
+
       formattedResponse += `\n\n---\n*Model: ${selectedModel}*`;
-      
+
       addAIMessage('assistant', formattedResponse);
-      
+
       // ऑटो-एक्जीक्यूट ऑप्शन्स
       if (action === 'Optimize Code' && state.activeFile) {
         setTimeout(() => {
           updateFileContent(state.activeFile!.id, '// Optimized by AI\n' + state.activeFile!.content);
         }, 500);
       }
-      
+
     } catch (error) {
       addAIMessage('assistant', '❌ Failed to process request. Please try again.');
     } finally {
@@ -268,7 +268,7 @@ User query: ${userMessage}`;
 
   const renderMessageContent = (content: string) => {
     const codeBlocks = content.split(/```(\w+)?\n([\s\S]*?)```/g);
-    
+
     return (
       <div className="space-y-2">
         {codeBlocks.map((part, index) => {
@@ -332,21 +332,20 @@ User query: ${userMessage}`;
   };
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-b from-black to-gray-900">
+    <div className="h-full flex flex-col bg-theme-primary">
       {/* Header */}
-      <div className="p-3 border-b border-red-900/50 bg-black/70">
+      <div className="p-3 border-b border-theme bg-theme-secondary/50 backdrop-blur-md">
         <div className="flex justify-between items-center mb-3">
           <div className="flex items-center space-x-2">
-            <Brain size={16} className="text-red-400" />
-            <div className="text-sm text-gray-300 font-mono">AI Co-Developer</div>
-            <div className={`flex items-center space-x-1 text-xs px-2 py-0.5 rounded-full ${
-              ollamaStatus === 'connected' ? 'bg-green-900/30 text-green-400' : 
-              ollamaStatus === 'disconnected' ? 'bg-red-900/30 text-red-400' : 
-              'bg-yellow-900/30 text-yellow-400'
-            }`}>
+            <Brain size={16} className="text-theme-accent" />
+            <div className="text-sm text-theme font-bold font-mono tracking-tight">AI Co-Developer</div>
+            <div className={`flex items-center space-x-1 text-[10px] px-2 py-0.5 rounded-full ${ollamaStatus === 'connected' ? 'bg-green-900/30 text-green-400' :
+                ollamaStatus === 'disconnected' ? 'bg-red-900/30 text-red-400' :
+                  'bg-yellow-900/30 text-yellow-400'
+              }`}>
               {ollamaStatus === 'connected' ? <Wifi size={10} /> : <WifiOff size={10} />}
-              <span>{ollamaStatus === 'connected' ? 'Ollama Connected' : 
-                    ollamaStatus === 'disconnected' ? 'Ollama Disconnected' : 'Checking...'}</span>
+              <span>{ollamaStatus === 'connected' ? 'Ollama Connected' :
+                ollamaStatus === 'disconnected' ? 'Ollama Disconnected' : 'Checking...'}</span>
             </div>
           </div>
           <button
@@ -390,7 +389,7 @@ User query: ${userMessage}`;
                 </button>
               </div>
             </div>
-            
+
             <div>
               <label className="text-xs text-gray-400 block mb-1">AI Model</label>
               <select
@@ -419,7 +418,7 @@ User query: ${userMessage}`;
                 )}
               </div>
             </div>
-            
+
             <div>
               <label className="text-xs text-gray-400 block mb-1">
                 Creativity: {temperature.toFixed(1)}
@@ -459,59 +458,29 @@ User query: ${userMessage}`;
             <div className="text-xs text-red-400/70 mt-1">
               Run: <code className="bg-black/50 px-1">ollama serve</code> in terminal
             </div>
-        </div>
+          </div>
         )}
 
         {/* Quick Actions Grid */}
-        <div className="grid grid-cols-3 gap-2 mt-3">
-          <button
-            onClick={() => handleQuickAction('Optimize Code')}
-            disabled={isProcessing || ollamaStatus !== 'connected'}
-            className="flex flex-col items-center p-2 bg-red-950/30 hover:bg-red-900/40 border border-red-900/40 rounded text-xs text-red-400 transition-all disabled:opacity-50 group"
-          >
-            <Zap size={14} className="mb-1 group-hover:scale-110 transition-transform" />
-            <span>Optimize</span>
-          </button>
-          <button
-            onClick={() => handleQuickAction('Debug Code')}
-            disabled={isProcessing || ollamaStatus !== 'connected'}
-            className="flex flex-col items-center p-2 bg-red-950/30 hover:bg-red-900/40 border border-red-900/40 rounded text-xs text-red-400 transition-all disabled:opacity-50 group"
-          >
-            <Bug size={14} className="mb-1 group-hover:scale-110 transition-transform" />
-            <span>Debug</span>
-          </button>
-          <button
-            onClick={() => handleQuickAction('Explain Code')}
-            disabled={isProcessing || ollamaStatus !== 'connected'}
-            className="flex flex-col items-center p-2 bg-red-950/30 hover:bg-red-900/40 border border-red-900/40 rounded text-xs text-red-400 transition-all disabled:opacity-50 group"
-          >
-            <Info size={14} className="mb-1 group-hover:scale-110 transition-transform" />
-            <span>Explain</span>
-          </button>
-          <button
-            onClick={() => handleQuickAction('Refactor Code')}
-            disabled={isProcessing || ollamaStatus !== 'connected'}
-            className="flex flex-col items-center p-2 bg-red-950/30 hover:bg-red-900/40 border border-red-900/40 rounded text-xs text-red-400 transition-all disabled:opacity-50 group"
-          >
-            <RefreshCw size={14} className="mb-1 group-hover:scale-110 transition-transform" />
-            <span>Refactor</span>
-          </button>
-          <button
-            onClick={() => handleQuickAction('Run Tests')}
-            disabled={isProcessing || ollamaStatus !== 'connected'}
-            className="flex flex-col items-center p-2 bg-red-950/30 hover:bg-red-900/40 border border-red-900/40 rounded text-xs text-red-400 transition-all disabled:opacity-50 group"
-          >
-            <Terminal size={14} className="mb-1 group-hover:scale-110 transition-transform" />
-            <span>Run Tests</span>
-          </button>
-          <button
-            onClick={() => openFile('README.md')}
-            disabled={isProcessing}
-            className="flex flex-col items-center p-2 bg-red-950/30 hover:bg-red-900/40 border border-red-900/40 rounded text-xs text-red-400 transition-all disabled:opacity-50 group"
-          >
-            <FileCode size={14} className="mb-1 group-hover:scale-110 transition-transform" />
-            <span>Docs</span>
-          </button>
+        <div className="grid grid-cols-3 gap-2 mt-3 p-1">
+          {[
+            { label: 'Optimize', icon: <Zap size={14} />, action: 'Optimize Code' },
+            { label: 'Debug', icon: <Bug size={14} />, action: 'Debug Code' },
+            { label: 'Explain', icon: <Info size={14} />, action: 'Explain Code' },
+            { label: 'Refactor', icon: <RefreshCw size={14} />, action: 'Refactor Code' },
+            { label: 'Tests', icon: <Terminal size={14} />, action: 'Run Tests' },
+            { label: 'Docs', icon: <FileCode size={14} />, action: 'README.md', isFile: true },
+          ].map((item) => (
+            <button
+              key={item.label}
+              onClick={() => item.isFile ? openFile(item.action) : handleQuickAction(item.action)}
+              disabled={isProcessing || (!item.isFile && ollamaStatus !== 'connected')}
+              className="flex flex-col items-center p-2 bg-theme-accent/10 hover:bg-theme-accent/20 border border-theme rounded text-[10px] text-theme-accent transition-all disabled:opacity-50 group uppercase font-bold tracking-tighter"
+            >
+              <div className="group-hover:scale-110 transition-transform mb-1">{item.icon}</div>
+              <span>{item.label}</span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -533,7 +502,7 @@ User query: ${userMessage}`;
               {ollamaStatus === 'connected' ? 'Ollama AI Ready' : 'AI Agent Offline'}
             </div>
             <div className="text-xs text-gray-600 max-w-xs mx-auto">
-              {ollamaStatus === 'connected' 
+              {ollamaStatus === 'connected'
                 ? 'Ask for code reviews, debugging help, optimizations, or explanations'
                 : 'Start Ollama service to enable AI features'}
             </div>
@@ -558,18 +527,17 @@ User query: ${userMessage}`;
             )}
           </div>
         )}
-        
+
         {state.aiMessages.map((msg) => (
           <div
             key={msg.id}
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeIn`}
           >
             <div
-              className={`max-w-[90%] px-4 py-3 rounded-xl ${
-                msg.role === 'user'
+              className={`max-w-[90%] px-4 py-3 rounded-xl ${msg.role === 'user'
                   ? 'bg-gradient-to-r from-red-900/40 to-red-800/30 text-red-100 border border-red-800/50'
                   : 'bg-gradient-to-r from-gray-900/70 to-gray-800/60 text-gray-300 border border-gray-800/50'
-              }`}
+                }`}
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center space-x-2">
@@ -618,7 +586,7 @@ User query: ${userMessage}`;
             </div>
           </div>
         ))}
-        
+
         {isProcessing && (
           <div className="flex justify-start">
             <div className="bg-gradient-to-r from-gray-900/70 to-gray-800/60 border border-gray-800/50 px-4 py-3 rounded-xl">
@@ -642,7 +610,7 @@ User query: ${userMessage}`;
       </div>
 
       {/* Input Area */}
-      <div className="p-3 border-t border-red-900/30 bg-black/60">
+      <div className="p-3 border-t border-theme bg-theme-secondary/80 backdrop-blur-xl">
         <div className="flex space-x-2">
           <input
             type="text"
@@ -650,20 +618,19 @@ User query: ${userMessage}`;
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSend()}
             placeholder={
-              ollamaStatus === 'connected' 
-                ? "Ask Ollama AI to review code, debug, optimize, or explain..." 
-                : "Ollama is not connected. Start ollama serve first."
+              ollamaStatus === 'connected'
+                ? "Ask anything..."
+                : "Agent offline"
             }
-            className="flex-1 bg-black/60 border border-red-900/40 rounded-lg px-4 py-3 text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-red-600 focus:ring-1 focus:ring-red-600/30 font-mono transition-all"
+            className="flex-1 bg-theme-primary/50 border border-theme rounded-lg px-4 py-2.5 text-sm text-theme placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-theme-accent transition-all"
             disabled={isProcessing || ollamaStatus !== 'connected'}
           />
           <button
             onClick={handleSend}
             disabled={isProcessing || !input.trim() || ollamaStatus !== 'connected'}
-            className="px-5 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 disabled:from-gray-800 disabled:to-gray-900 disabled:text-gray-600 text-white rounded-lg transition-all flex items-center space-x-2 shadow-lg hover:shadow-red-900/30 disabled:shadow-none"
+            className="px-4 py-2.5 bg-theme-accent hover:opacity-90 disabled:bg-gray-800 disabled:text-gray-600 text-white rounded-lg transition-all flex items-center space-x-2 font-bold shadow-lg shadow-theme-accent/20"
           >
             <Send size={16} />
-            <span className="text-sm font-medium">Send</span>
           </button>
         </div>
         <div className="flex justify-between mt-2">

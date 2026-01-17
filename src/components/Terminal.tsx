@@ -1,12 +1,89 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { useOS } from '../context/OSContext';
-import { Terminal as TerminalIcon, ChevronRight, Folder, Search, Home, FolderOpen, File } from 'lucide-react';
+import { ChevronRight, FolderOpen, File, Palette } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
 
 interface CommandSuggestion {
   command: string;
   description: string;
   icon?: React.ReactNode;
 }
+
+interface TerminalTheme {
+  name: string;
+  background: string;
+  foreground: string;
+  border: string;
+  accent: string;
+  userColor: string;
+  pathColor: string;
+  commandColor: string;
+  cursorColor: string;
+  font: string;
+}
+
+const terminalThemes: Record<string, TerminalTheme> = {
+  henu: {
+    name: 'HENU OS',
+    background: 'bg-black/40',
+    foreground: 'text-gray-300',
+    border: 'border-red-900/30',
+    accent: 'text-red-400',
+    userColor: 'text-cyan-400',
+    pathColor: 'text-yellow-400',
+    commandColor: 'text-gray-100',
+    cursorColor: 'caret-green-500',
+    font: 'font-mono'
+  },
+  matrix: {
+    name: 'Matrix',
+    background: 'bg-black/90',
+    foreground: 'text-green-500',
+    border: 'border-green-900/50',
+    accent: 'text-green-400',
+    userColor: 'text-green-600',
+    pathColor: 'text-green-400',
+    commandColor: 'text-green-300',
+    cursorColor: 'caret-green-400',
+    font: 'font-mono'
+  },
+  cyberpunk: {
+    name: 'Cyberpunk',
+    background: 'bg-indigo-950/80',
+    foreground: 'text-pink-300',
+    border: 'border-yellow-500/30',
+    accent: 'text-yellow-400',
+    userColor: 'text-purple-400',
+    pathColor: 'text-cyan-400',
+    commandColor: 'text-white',
+    cursorColor: 'caret-yellow-400',
+    font: 'font-mono'
+  },
+  nord: {
+    name: 'Nord',
+    background: 'bg-[#2E3440]/90',
+    foreground: 'text-[#D8DEE9]',
+    border: 'border-[#4C566A]',
+    accent: 'text-[#88C0D0]',
+    userColor: 'text-[#81A1C1]',
+    pathColor: 'text-[#A3BE8C]',
+    commandColor: 'text-[#ECEFF4]',
+    cursorColor: 'caret-[#88C0D0]',
+    font: 'font-mono'
+  },
+  sunset: {
+    name: 'Sunset',
+    background: 'bg-orange-950/70',
+    foreground: 'text-orange-100',
+    border: 'border-orange-500/20',
+    accent: 'text-orange-400',
+    userColor: 'text-red-400',
+    pathColor: 'text-yellow-400',
+    commandColor: 'text-white',
+    cursorColor: 'caret-red-500',
+    font: 'font-mono'
+  }
+};
 
 export const Terminal = () => {
   const {
@@ -21,6 +98,9 @@ export const Terminal = () => {
     setCurrentPath,
     executeCommand: executeOSCommand
   } = useOS();
+
+  const { activeTheme: globalTheme } = useTheme();
+  const theme = terminalThemes[globalTheme.id] || terminalThemes.henu;
 
   const [input, setInput] = useState('');
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
@@ -554,10 +634,10 @@ export const Terminal = () => {
               default:
                 aiOutput = `✅ ${args[0].charAt(0).toUpperCase() + args[0].slice(1)} completed successfully!`;
             }
-            addTerminalCommand(cmd, output + aiOutput);
+            addTerminalCommand(cmd, output + aiOutput, false);
           }, 1500);
 
-          addTerminalCommand(cmd, output);
+          addTerminalCommand(cmd, output, false);
           setInput('');
           return;
         } else {
@@ -579,7 +659,7 @@ export const Terminal = () => {
       setCommandHistory(prev => [...prev, cmd.trim()].slice(-100));
     }
 
-    addTerminalCommand(cmd, output);
+    addTerminalCommand(cmd, output, isError);
     executeOSCommand(cmd);
   };
 
@@ -609,10 +689,11 @@ export const Terminal = () => {
     return state.currentPath.split('/').pop() || '~';
   };
 
+
   return (
-    <div className="h-full flex flex-col bg-transparent font-mono text-sm">
+    <div className={`h-full flex flex-col bg-transparent ${theme.font} text-sm`}>
       {/* Terminal Body */}
-      <div className="flex-1 overflow-auto p-4 bg-black/40">
+      <div className={`flex-1 overflow-auto p-4 ${theme.background}`}>
         {/* Welcome Message - Show only on first load */}
         {state.terminalHistory.length === 0 && (
           <div className="text-green-400 mb-6">
@@ -642,16 +723,16 @@ export const Terminal = () => {
           {state.terminalHistory.map((item, i) => (
             <div key={i} className="mb-3 group">
               <div className="flex items-center space-x-2 mb-1">
-                <div className="flex items-center space-x-2 text-cyan-400 flex-shrink-0">
+                <div className={`flex items-center space-x-2 ${theme.userColor} flex-shrink-0`}>
                   <ChevronRight size={12} />
                   <span className="font-bold">{user}</span>
                   <span className="text-gray-500">@</span>
                   <span className="font-bold">{host}</span>
                   <span className="text-gray-500">:</span>
-                  <span className="text-yellow-400">{getCurrentDirectoryName()}</span>
+                  <span className={theme.pathColor}>{getCurrentDirectoryName()}</span>
                   <span className="text-gray-500">$</span>
                 </div>
-                <span className="text-gray-300 break-all">{item.command}</span>
+                <span className={`${theme.commandColor} break-all`}>{item.command}</span>
                 <button
                   onClick={() => {
                     setInput(item.command);
@@ -664,7 +745,7 @@ export const Terminal = () => {
                 </button>
               </div>
               {item.output && (
-                <div className={`ml-8 mt-1 whitespace-pre-wrap break-words ${item.output.includes('not found') || item.output.includes('Usage:') || item.output.includes('Invalid') || item.output.includes('cannot') ? 'text-red-400' : 'text-gray-300'}`}>
+                <div className={`ml-8 mt-1 whitespace-pre-wrap break-words ${item.isError ? 'text-red-400' : 'text-gray-300'}`}>
                   {item.output}
                 </div>
               )}
@@ -675,13 +756,13 @@ export const Terminal = () => {
         {/* Input Area */}
         <div className="mt-4 relative">
           <div className="flex items-start space-x-2 mb-2">
-            <div className="flex items-center space-x-2 text-cyan-400 flex-shrink-0 pt-1">
+            <div className={`flex items-center space-x-2 ${theme.userColor} flex-shrink-0 pt-1`}>
               <ChevronRight size={14} />
               <span className="font-bold">{user}</span>
               <span className="text-gray-500">@</span>
               <span className="font-bold">{host}</span>
               <span className="text-gray-500">:</span>
-              <span className="text-yellow-400">{getCurrentDirectoryName()}</span>
+              <span className={theme.pathColor}>{getCurrentDirectoryName()}</span>
               <span className="text-gray-500">$</span>
             </div>
 
@@ -692,7 +773,7 @@ export const Terminal = () => {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                className="w-full bg-transparent text-gray-100 focus:outline-none caret-green-500 placeholder-gray-600"
+                className={`w-full bg-transparent ${theme.commandColor} focus:outline-none ${theme.cursorColor} placeholder-gray-600`}
                 placeholder="Type command here..."
                 autoFocus
                 spellCheck={false}
@@ -727,71 +808,25 @@ export const Terminal = () => {
             </form>
           </div>
 
-          {/* Quick Commands */}
-          <div className="flex flex-wrap gap-2 mt-4">
-            <button
-              onClick={() => setInput('ls -la')}
-              className="px-3 py-1 text-xs bg-gray-800 hover:bg-gray-700 rounded-md text-gray-300 flex items-center space-x-1"
-            >
-              <Folder size={12} />
-              <span>ls -la</span>
-            </button>
-            <button
-              onClick={() => setInput('cd ~')}
-              className="px-3 py-1 text-xs bg-gray-800 hover:bg-gray-700 rounded-md text-gray-300 flex items-center space-x-1"
-            >
-              <Home size={12} />
-              <span>cd ~</span>
-            </button>
-            <button
-              onClick={() => setInput('henu fix')}
-              className="px-3 py-1 text-xs bg-purple-900/30 hover:bg-purple-900/50 rounded-md text-purple-300 flex items-center space-x-1"
-            >
-              <TerminalIcon size={12} />
-              <span>henu fix</span>
-            </button>
-            <button
-              onClick={() => setInput('ps')}
-              className="px-3 py-1 text-xs bg-gray-800 hover:bg-gray-700 rounded-md text-gray-300"
-            >
-              ps
-            </button>
-            <button
-              onClick={() => setInput('df -h')}
-              className="px-3 py-1 text-xs bg-gray-800 hover:bg-gray-700 rounded-md text-gray-300"
-            >
-              df
-            </button>
-            <button
-              onClick={() => setInput('history')}
-              className="px-3 py-1 text-xs bg-gray-800 hover:bg-gray-700 rounded-md text-gray-300"
-            >
-              history
-            </button>
-          </div>
         </div>
 
         <div ref={terminalEndRef} />
       </div>
 
       {/* Terminal Footer */}
-      <div className="px-4 py-2 border-t border-gray-800 flex items-center justify-between text-xs text-gray-600 bg-gray-900/80">
+      <div className={`px-4 py-2 border-t ${theme.border} flex items-center justify-between text-xs text-gray-600 ${theme.background} backdrop-blur-md`}>
         <div className="flex items-center space-x-4 overflow-x-auto">
-          <div className="flex items-center space-x-1">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-            <span className="hidden sm:inline">Online</span>
+          <div className="flex items-center space-x-2">
+            <Palette size={12} className="text-theme-accent" />
+            <span className="hidden sm:inline">Theme: {globalTheme.name}</span>
           </div>
           <div className="flex items-center space-x-1">
             <FolderOpen size={12} />
             <span>{listDirectory().length} items</span>
           </div>
-          <div className="flex items-center space-x-1">
+          <div className="flex items-center space-x-1 text-blue-400">
             <File size={12} />
-            <span>{commandHistory.length} commands</span>
-          </div>
-          <div className="hidden md:flex items-center space-x-1">
-            <Search size={12} />
-            <span>Press Tab for suggestions</span>
+            <span>{commandHistory.length} logs</span>
           </div>
         </div>
         <div className="font-mono text-gray-500">

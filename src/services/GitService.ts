@@ -171,6 +171,38 @@ export class GitService {
     }
 
     /**
+     * Unstage all files
+     */
+    async unstageAll(): Promise<void> {
+        try {
+            const status = await this.getStatus();
+            for (const file of status.staged) {
+                await this.reset(file);
+            }
+        } catch (error) {
+            console.error('Git unstage all failed:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Discard changes for a file (checkout)
+     */
+    async discardChanges(filepath: string): Promise<void> {
+        try {
+            await git.checkout({
+                fs: this.fs,
+                dir: this.dir,
+                filepaths: [filepath],
+                force: true
+            });
+        } catch (error) {
+            console.error('Git discard changes failed:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Commit staged changes
      */
     async commit(message: string, author?: { name: string; email: string }): Promise<string> {

@@ -3,14 +3,14 @@ import { useOS, FileSystemNode } from '../context/OSContext';
 import { codeRunner, ExecutionResult } from '../services/CodeRunner';
 import { TabBar } from './TabBar';
 import {
-  Code2, Save, Search, FileText,
-  Eye, EyeOff, Type,
-  Play, Square, Terminal,
-  Loader, AlertCircle
+  Code2, Save, Search,
+  Eye, EyeOff,
+  Play, Loader, AlignLeft
 } from 'lucide-react';
+import { formatCode } from '../services/FormatService';
 
 export const CodeEditor = () => {
-  const { state, updateFileContent, addTerminalCommand, openTab, closeTab } = useOS();
+  const { state, updateFileContent, addTerminalCommand, openTab, closeTab, addOutputMessage } = useOS();
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState(''); // Track original content for dirty state
   const [dirtyTabs, setDirtyTabs] = useState<Set<string>>(new Set());
@@ -30,6 +30,13 @@ export const CodeEditor = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const outputRef = useRef<HTMLDivElement>(null);
+
+  // Auto-save state
+  const [autoSaveEnabled, setAutoSaveEnabled] = useState(true);
+  const [autoSaveDelay] = useState(2000); // 2 seconds default
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const [lastAutoSaved, setLastAutoSaved] = useState<Date | null>(null);
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const currentFile = state.activeFile;
 
@@ -118,6 +125,73 @@ export const CodeEditor = () => {
     return text.trim().split(/\s+/).filter(word => word.length > 0).length;
   };
 
+  const [isFormatting, setIsFormatting] = useState(false);
+
+  const handleFormat = async () => {
+    if (!currentFile || !content) return;
+
+    setIsFormatting(true);
+    try {
+      const formatted = await formatCode(content, currentFile.name);
+      if (formatted !== content) {
+        setContent(formatted);
+        setIsDirty(true);
+        addOutputMessage(`Formatted ${currentFile.name}`, 'info');
+      }
+    } catch (error: any) {
+      addOutputMessage(`Format error: ${error.message}`, 'error');
+    } finally {
+      setIsFormatting(false);
+    }
+  };
+
+  // Auto-save function
+  const performAutoSave = useCallback(() => {
+    if (currentFile && isDirty && autoSaveEnabled) {
+      setIsAutoSaving(true);
+      updateFileContent(currentFile.id, content);
+      setOriginalContent(content);
+      setIsDirty(false);
+      setLastAutoSaved(new Date());
+
+      // Remove from dirty tabs
+      setDirtyTabs(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(currentFile.id);
+        return newSet;
+      });
+
+      // Brief visual feedback then hide
+      setTimeout(() => {
+        setIsAutoSaving(false);
+      }, 800);
+    }
+  }, [currentFile, isDirty, autoSaveEnabled, content, updateFileContent]);
+
+  // Trigger auto-save after delay when content changes
+  useEffect(() => {
+    if (!autoSaveEnabled || !isDirty || !currentFile) {
+      return;
+    }
+
+    // Clear any previous timeout
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+
+    // Set new timeout for auto-save
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      performAutoSave();
+    }, autoSaveDelay);
+
+    // Cleanup on unmount or when dependencies change
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [content, isDirty, autoSaveEnabled, autoSaveDelay, currentFile, performAutoSave]);
+
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newContent = e.target.value;
     setContent(newContent);
@@ -130,8 +204,15 @@ export const CodeEditor = () => {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = (isAutoSave: boolean = false) => {
     if (currentFile) {
+      if (!isAutoSave) {
+        // Cancel any pending auto-save if manual save
+        if (autoSaveTimeoutRef.current) {
+          clearTimeout(autoSaveTimeoutRef.current);
+        }
+      }
+
       updateFileContent(currentFile.id, content);
       setOriginalContent(content); // Update original content
       setIsDirty(false);
@@ -143,11 +224,13 @@ export const CodeEditor = () => {
         return newSet;
       });
 
-      const toast = document.createElement('div');
-      toast.className = 'fixed top-4 right-4 bg-green-900 text-green-300 px-3 py-2 rounded text-sm z-50';
-      toast.textContent = `Saved: ${currentFile.name}`;
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 2000);
+      if (!isAutoSave) {
+        const toast = document.createElement('div');
+        toast.className = 'fixed top-4 right-4 bg-green-900 text-green-300 px-3 py-2 rounded text-sm z-50';
+        toast.textContent = `Saved: ${currentFile.name}`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 2000);
+      }
     }
   };
 
@@ -265,19 +348,29 @@ export const CodeEditor = () => {
 
       if (!result) {
         setOutput(prev => `❌ Execution failed: No result returned\n${'─'.repeat(60)}\n${prev}`);
+        addOutputMessage('Execution failed: No result returned', 'error');
         setIsRunning(false);
         setIsLoadingPython(false);
         return;
       }
 
-      setOutput(prev => {
-        const timestamp = new Date().toLocaleTimeString();
-        const timeInfo = result.executionTime > 0
-          ? `\n⏱️ Execution time: ${result.executionTime.toFixed(2)}ms`
-          : '';
+      if (result) {
+        const currentResult = result; // Capture for narrowing
+        setOutput(prev => {
+          const timestamp = new Date().toLocaleTimeString();
+          const timeInfo = currentResult.executionTime > 0
+            ? `\n⏱️ Execution time: ${currentResult.executionTime.toFixed(2)}ms`
+            : '';
 
-        return `[${timestamp}] ${result.output}${timeInfo}\n${'─'.repeat(60)}\n${prev}`;
-      });
+          return `[${timestamp}] ${currentResult.output}${timeInfo}\n${'─'.repeat(60)}\n${prev}`;
+        });
+
+        // Add to BottomPanel output
+        addOutputMessage(
+          `${currentResult.output}${currentResult.executionTime > 0 ? ` (${currentResult.executionTime.toFixed(2)}ms)` : ''}`,
+          currentResult.success ? 'success' : 'error'
+        );
+      }
 
       // Add to terminal history
       addTerminalCommand(`run ${currentFile.name}`, result.output);
@@ -292,6 +385,7 @@ export const CodeEditor = () => {
 
     } catch (error: any) {
       setOutput(prev => `❌ Fatal Error: ${error.message}\n${error.stack || ''}\n${'─'.repeat(60)}\n${prev}`);
+      addOutputMessage(`Fatal Error: ${error.message}`, 'error');
 
       const toast = document.createElement('div');
       toast.className = 'fixed top-4 right-4 bg-red-900 text-red-300 px-3 py-2 rounded text-sm z-50';
@@ -346,80 +440,59 @@ export const CodeEditor = () => {
       setShowOutput(!showOutput);
     }
 
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = (e.target as HTMLTextAreaElement).selectionStart;
+      const end = (e.target as HTMLTextAreaElement).selectionEnd;
+      const newValue = content.substring(0, start) + ("  ") + content.substring(end);
+      setContent(newValue);
+
+      // Reset cursor position
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = textareaRef.current.selectionEnd = start + 2;
+        }
+      }, 0);
+    }
+
+    // Auto-pairing
+    const pairs: Record<string, string> = {
+      '(': ')',
+      '[': ']',
+      '{': '}',
+      '\'': '\'',
+      '"': '"',
+      '`': '`'
+    };
+
+    if (pairs[e.key]) {
+      e.preventDefault();
+      const start = (e.target as HTMLTextAreaElement).selectionStart;
+      const end = (e.target as HTMLTextAreaElement).selectionEnd;
+      const selection = content.substring(start, end);
+      const newValue = content.substring(0, start) + e.key + selection + pairs[e.key] + content.substring(end);
+      setContent(newValue);
+
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = start + 1;
+          textareaRef.current.selectionEnd = end + 1;
+        }
+      }, 0);
+    }
+
+    if (e.shiftKey && e.altKey && e.key === 'F') {
+      e.preventDefault();
+      handleFormat();
+    }
+
     if (e.key === 'Escape' && showSearch) {
       setShowSearch(false);
     }
   };
 
-  const handleFormatCode = () => {
-    if (!currentFile) return;
+  // Remove old handleFormatCode function
 
-    const ext = getFileExtension(currentFile.name);
-    let formatted = content;
-
-    try {
-      switch (ext) {
-        case 'json':
-          formatted = JSON.stringify(JSON.parse(content), null, 2);
-          break;
-        case 'html':
-          // Simple HTML formatting
-          formatted = content
-            .replace(/>\s*</g, '>\n<')
-            .replace(/</g, '\n<')
-            .replace(/>/g, '>\n')
-            .split('\n')
-            .filter(line => line.trim())
-            .map((line, i, arr) => {
-              const trimmed = line.trim();
-              if (trimmed.startsWith('</')) {
-                return '  '.repeat(Math.max(0, arr.slice(0, i).filter(l => l.includes('<')).length - 1)) + trimmed;
-              }
-              return '  '.repeat(arr.slice(0, i).filter(l => l.includes('<')).length) + trimmed;
-            })
-            .join('\n');
-          break;
-        case 'js':
-        case 'ts':
-        case 'jsx':
-        case 'tsx':
-          // Basic JavaScript formatting
-          formatted = content
-            .replace(/\{/g, ' {\n')
-            .replace(/\}/g, '\n}')
-            .replace(/;/g, ';\n')
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => line)
-            .map(line => '  ' + line)
-            .join('\n');
-          break;
-        case 'css':
-          formatted = content
-            .replace(/\{/g, ' {\n  ')
-            .replace(/\}/g, '\n}\n')
-            .replace(/;/g, ';\n')
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => line)
-            .join('\n');
-          break;
-        case 'py':
-          formatted = content
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => line)
-            .map(line => '  ' + line)
-            .join('\n');
-          break;
-      }
-
-      setContent(formatted);
-      setIsDirty(true);
-    } catch (error) {
-      console.error('Formatting error:', error);
-    }
-  };
 
   const getFileIcon = () => {
     if (!currentFile) return '📄';
@@ -487,20 +560,6 @@ export const CodeEditor = () => {
     }
   };
 
-  const handleClearOutput = () => {
-    setOutput('');
-  };
-
-  const handleCopyOutput = () => {
-    navigator.clipboard.writeText(output);
-
-    const toast = document.createElement('div');
-    toast.className = 'fixed top-4 right-4 bg-blue-900 text-blue-300 px-3 py-2 rounded text-sm z-50';
-    toast.textContent = 'Output copied to clipboard';
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2000);
-  };
-
   if (!currentFile || currentFile.type !== 'file') {
     return (
       <div className="h-full flex items-center justify-center bg-gradient-to-b from-gray-900/90 to-black/90">
@@ -535,7 +594,7 @@ export const CodeEditor = () => {
       />
 
       {/* Editor Header */}
-      <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between bg-gray-900/90 backdrop-blur-sm">
+      <div className="px-4 py-3 border-b border-theme flex items-center justify-between bg-theme-secondary/80 backdrop-blur-sm">
         <div className="flex items-center space-x-3 flex-1 min-w-0">
           <div className={`w-2 h-2 rounded-full ${isDirty ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></div>
           <span className="text-2xl">{getFileIcon()}</span>
@@ -573,18 +632,10 @@ export const CodeEditor = () => {
 
           <button
             onClick={() => setShowSearch(true)}
-            className="p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-gray-300 transition-colors"
+            className="p-2 hover:bg-white/10 rounded text-theme-muted hover:text-theme transition-colors"
             title="Search (Ctrl+F)"
           >
             <Search size={16} />
-          </button>
-
-          <button
-            onClick={handleFormatCode}
-            className="p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-gray-300 transition-colors"
-            title="Format Code"
-          >
-            <Type size={16} />
           </button>
 
           <button
@@ -611,25 +662,52 @@ export const CodeEditor = () => {
             )}
           </button>
 
+          {/* Auto-save indicator */}
+          {isAutoSaving && (
+            <div className="flex items-center space-x-1 text-yellow-400 text-xs animate-pulse">
+              <div className="w-2 h-2 bg-yellow-400 rounded-full animate-ping"></div>
+              <span>Auto-saving...</span>
+            </div>
+          )}
+
+          {/* Last auto-saved indicator */}
+          {!isAutoSaving && lastAutoSaved && autoSaveEnabled && (
+            <div className="text-gray-500 text-xs flex items-center space-x-1">
+              <span>Auto-saved</span>
+            </div>
+          )}
+
           <button
-            onClick={() => setShowOutput(!showOutput)}
-            className={`p-2 rounded transition-colors ${showOutput
-              ? 'bg-blue-900/40 text-blue-300'
-              : 'hover:bg-gray-800 text-gray-400 hover:text-gray-300'
-              }`}
-            title="Toggle Output (Ctrl+E)"
+            onClick={handleFormat}
+            disabled={isFormatting}
+            className="p-2 hover:bg-gray-800 rounded text-gray-400 hover:text-gray-300 transition-colors disabled:opacity-50"
+            title="Format Code (Alt+Shift+F)"
           >
-            <Terminal size={16} />
+            {isFormatting ? <Loader size={16} className="animate-spin" /> : <AlignLeft size={16} />}
+            <span className="text-xs hidden sm:inline ml-1">Format</span>
           </button>
 
           <button
-            onClick={handleSave}
+            onClick={() => handleSave(false)}
             disabled={!isDirty}
-            className="p-2 bg-blue-900/40 hover:bg-blue-800/40 rounded text-blue-300 hover:text-blue-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center space-x-1"
+            className="p-2 bg-theme-accent/20 hover:bg-theme-accent/30 rounded text-theme-accent hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center space-x-1"
             title="Save (Ctrl+S)"
           >
             <Save size={16} />
             <span className="text-xs hidden sm:inline">Save</span>
+          </button>
+
+          {/* Auto-save toggle */}
+          <button
+            onClick={() => setAutoSaveEnabled(!autoSaveEnabled)}
+            className={`p-2 rounded transition-colors text-xs flex items-center space-x-1 ${autoSaveEnabled
+              ? 'bg-green-900/40 text-green-400 hover:bg-green-800/40'
+              : 'bg-gray-800 text-gray-500 hover:bg-gray-700'
+              }`}
+            title={`Auto-save: ${autoSaveEnabled ? 'ON' : 'OFF'} (${autoSaveDelay / 1000}s delay)`}
+          >
+            <span className={`w-2 h-2 rounded-full ${autoSaveEnabled ? 'bg-green-400' : 'bg-gray-500'}`}></span>
+            <span className="hidden sm:inline">Auto</span>
           </button>
         </div>
       </div>
@@ -637,20 +715,20 @@ export const CodeEditor = () => {
       {/* Editor Toolbar */}
       <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between bg-gray-900/80 text-xs">
         <div className="flex items-center space-x-4">
-          <div className="text-gray-400">
-            <span className="text-green-400 font-mono">{cursorLine}:{cursorCol}</span>
+          <div className="text-theme-muted">
+            <span className="text-theme-accent font-mono">{cursorLine}:{cursorCol}</span>
           </div>
-          <div className="text-gray-400">
+          <div className="text-theme-muted">
             <span className="text-purple-400 font-mono">{totalLines} lines</span>
           </div>
-          <div className="text-gray-400">
-            <span className="text-blue-400 font-mono">{wordCount} words</span>
+          <div className="text-theme-muted">
+            <span className="text-theme-accent font-mono">{wordCount} words</span>
           </div>
-          <div className="text-gray-400">
+          <div className="text-theme-muted">
             <span className="text-yellow-400 font-mono">{content.length} chars</span>
           </div>
-          <div className="text-gray-400">
-            <span className="text-cyan-400 font-mono">.{fileExt}</span>
+          <div className="text-theme-muted">
+            <span className="text-theme-accent font-mono">.{fileExt}</span>
           </div>
         </div>
         <div className="flex items-center space-x-2">
@@ -687,23 +765,21 @@ export const CodeEditor = () => {
       <div className="flex-1 flex flex-col">
         <div className="flex-1 relative overflow-hidden" ref={editorRef}>
           {/* Line Numbers */}
-          {showLineNumbers && (
-            <div className="absolute left-0 top-0 bottom-0 w-12 bg-gray-900/50 border-r border-gray-800 overflow-y-auto">
-              <div className="py-4">
-                {lines.map((_, i) => (
-                  <div
-                    key={i}
-                    className={`text-right pr-3 text-xs font-mono h-6 flex items-center justify-end ${i + 1 === cursorLine
-                      ? 'text-green-400 bg-green-900/20 font-bold'
-                      : 'text-gray-600'
-                      }`}
-                  >
-                    {i + 1}
-                  </div>
-                ))}
-              </div>
+          <div className="absolute left-0 top-0 bottom-0 w-12 bg-theme-secondary/30 border-r border-theme overflow-y-auto z-10">
+            <div className="py-4">
+              {lines.map((_, i) => (
+                <div
+                  key={i}
+                  className={`text-right pr-3 text-xs font-mono h-6 flex items-center justify-end ${i + 1 === cursorLine
+                    ? 'text-theme-accent bg-theme-accent/10 font-bold'
+                    : 'text-theme-muted'
+                    }`}
+                >
+                  {i + 1}
+                </div>
+              ))}
             </div>
-          )}
+          </div>
 
           {/* Text Editor */}
           <textarea
@@ -711,14 +787,14 @@ export const CodeEditor = () => {
             value={content}
             onChange={handleChange}
             onSelect={handleSelectionChange}
-            className={`absolute inset-0 w-full h-full bg-transparent text-gray-300 font-mono focus:outline-none resize-none p-4 ${showLineNumbers ? 'pl-16' : 'pl-4'
-              } ${theme === 'oled' ? 'bg-black' : theme === 'light' ? 'bg-white text-gray-900' : ''}`}
+            onKeyDown={handleKeyDown}
+            className="absolute inset-0 w-full h-full bg-theme-primary text-theme font-mono focus:outline-none resize-none p-4 pl-16 selection:bg-theme-accent/30"
             style={{
-              caretColor: '#10b981',
-              lineHeight: '1.6',
+              caretColor: '#FF6347',
+              lineHeight: '1.5',
               tabSize: 2,
               fontSize: `${fontSize}px`,
-              fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace"
+              fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace"
             }}
             spellCheck={false}
             placeholder="Start typing here..."
@@ -727,74 +803,15 @@ export const CodeEditor = () => {
           {/* Highlight current line */}
           {cursorLine > 0 && (
             <div
-              className="absolute left-0 right-0 bg-green-900/10 border-l-2 border-green-500"
+              className="absolute right-0 bg-red-900/10 border-l-2 border-red-500/50 pointer-events-none"
               style={{
-                top: `${(cursorLine - 1) * 1.6 * fontSize}px`,
-                height: `${1.6 * fontSize}px`,
-                left: showLineNumbers ? '48px' : '0'
+                top: `${(cursorLine - 1) * 1.5 * fontSize + 16}px`,
+                height: `${1.5 * fontSize}px`,
+                left: '48px'
               }}
             ></div>
           )}
         </div>
-
-        {/* Output Panel */}
-        {showOutput && (
-          <div className={`border-t border-gray-800 ${showOutput ? 'h-64' : 'h-0'} transition-all duration-300`}>
-            <div className="px-4 py-2 bg-gray-900/80 text-xs text-gray-400 font-mono flex justify-between items-center">
-              <div className="flex items-center space-x-2">
-                <Terminal size={12} />
-                <span>Output</span>
-                {fileExt === 'py' && !(window as any).pyodide && (
-                  <div className="flex items-center space-x-1 text-yellow-400">
-                    <AlertCircle size={10} />
-                    <span>Python runtime not loaded</span>
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={handleCopyOutput}
-                  className="text-xs text-gray-500 hover:text-gray-300 flex items-center space-x-1"
-                  title="Copy Output"
-                >
-                  <FileText size={10} />
-                  <span>Copy</span>
-                </button>
-                <button
-                  onClick={handleClearOutput}
-                  className="text-xs text-gray-500 hover:text-gray-300 flex items-center space-x-1"
-                  title="Clear Output"
-                >
-                  <Square size={10} />
-                  <span>Clear</span>
-                </button>
-                <button
-                  onClick={() => setShowOutput(false)}
-                  className="text-xs text-gray-500 hover:text-gray-300"
-                  title="Close Output"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div
-              ref={outputRef}
-              className="p-4 text-sm font-mono text-gray-300 whitespace-pre overflow-auto bg-black/80 h-full"
-            >
-              {output || (
-                <div className="text-gray-600">
-                  <div className="mb-4">Output will appear here after running the code.</div>
-                  <div className="text-xs space-y-1">
-                    <div>✓ Click <span className="text-green-400">Run</span> or press <kbd className="px-1 bg-gray-800 rounded">Ctrl+R</kbd></div>
-                    <div>✓ For HTML files, a new tab will open</div>
-                    <div>✓ For Python, Pyodide will be loaded automatically</div>
-                    <div>✓ For JavaScript, code runs in sandboxed environment</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Status Bar */}
