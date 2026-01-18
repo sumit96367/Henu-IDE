@@ -19,8 +19,8 @@ import {
 } from 'lucide-react';
 import { useTheme, themes } from '../context/ThemeContext';
 
-// Electron IPC
-const ipcRenderer = (window as any).require?.('electron')?.ipcRenderer;
+// Electron API (exposed via preload.js with context isolation)
+const electronAPI = (window as any).electronAPI;
 
 // Workspace component logic
 type LayoutMode = 'default' | 'code' | 'terminal' | 'preview' | 'ai' | 'custom';
@@ -312,15 +312,15 @@ export const Workspace = () => {
 
   // Window control functions
   const handleMinimize = () => {
-    if (ipcRenderer) ipcRenderer.send('window-minimize');
+    if (electronAPI) electronAPI.minimizeWindow();
   };
 
   const handleMaximize = () => {
-    if (ipcRenderer) ipcRenderer.send('window-maximize');
+    if (electronAPI) electronAPI.maximizeWindow();
   };
 
   const handleClose = () => {
-    if (ipcRenderer) ipcRenderer.send('window-close');
+    if (electronAPI) electronAPI.closeWindow();
   };
 
   // Global keyboard shortcuts
@@ -417,10 +417,10 @@ export const Workspace = () => {
         break;
       case 'openFile':
         // Use Electron's file dialog
-        if (ipcRenderer) {
+        if (electronAPI) {
           (async () => {
             try {
-              const result = await ipcRenderer.invoke('open-file-dialog');
+              const result = await electronAPI.openFileDialog();
               if (result && result.success) {
                 // Create a FileSystemNode from the result and open it
                 const fileNode = {
@@ -445,10 +445,10 @@ export const Workspace = () => {
         break;
       case 'openFolder':
         // Use Electron's folder dialog
-        if (ipcRenderer) {
+        if (electronAPI) {
           (async () => {
             try {
-              const result = await ipcRenderer.invoke('open-folder-dialog');
+              const result = await electronAPI.openFolderDialog();
               if (result) {
                 updateFileSystem(result.fileSystem);
                 setCurrentPath(result.path);
@@ -466,10 +466,10 @@ export const Workspace = () => {
       case 'save':
         if (state.activeFile) {
           // Save to disk if file has a real path and we're in Electron
-          if (state.activeFile.path && ipcRenderer) {
+          if (state.activeFile.path && electronAPI) {
             (async () => {
               try {
-                const result = await ipcRenderer.invoke('save-file', state.activeFile!.path, state.activeFile!.content || '');
+                const result = await electronAPI.saveFile(state.activeFile!.path, state.activeFile!.content || '');
                 if (result.success) {
                   addOutputMessage(`Saved: ${state.activeFile!.name}`, 'success');
                 } else {

@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { X, FolderPlus, Loader2 } from 'lucide-react';
 
-// Electron IPC
-const ipcRenderer = (window as any).require?.('electron')?.ipcRenderer;
+// Electron API (exposed via preload.js with context isolation)
+const electronAPI = (window as any).electronAPI;
 
 interface NewProjectDialogProps {
     isOpen: boolean;
@@ -49,8 +49,8 @@ export const NewProjectDialog = ({ isOpen, onClose, onProjectCreated }: NewProje
             return;
         }
 
-        if (!ipcRenderer) {
-            setError('Electron IPC not available');
+        if (!electronAPI) {
+            setError('Electron API not available - run with npm run electron:dev');
             return;
         }
 
@@ -58,7 +58,7 @@ export const NewProjectDialog = ({ isOpen, onClose, onProjectCreated }: NewProje
         setError('');
 
         try {
-            const result = await ipcRenderer.invoke('create-project', projectName.trim());
+            const result = await electronAPI.createProject(projectName.trim());
 
             if (result.success) {
                 onProjectCreated({
@@ -143,8 +143,8 @@ export const NewProjectDialog = ({ isOpen, onClose, onProjectCreated }: NewProje
                                     onClick={() => setSelectedTemplate(template.id)}
                                     disabled={isCreating}
                                     className={`p-3 rounded-lg border text-left transition-all ${selectedTemplate === template.id
-                                            ? 'border-theme-accent bg-theme-accent/10'
-                                            : 'border-theme hover:border-gray-600'
+                                        ? 'border-theme-accent bg-theme-accent/10'
+                                        : 'border-theme hover:border-gray-600'
                                         } disabled:opacity-50`}
                                 >
                                     <div className="flex items-center space-x-2 mb-1">

@@ -17,32 +17,8 @@ import {
 } from 'lucide-react';
 import { NewProjectDialog } from './NewProjectDialog';
 
-// Get Electron IPC renderer - try multiple ways to access it
-const getIpcRenderer = () => {
-    // Try window.require (Electron with nodeIntegration)
-    if ((window as any).require) {
-        try {
-            return (window as any).require('electron').ipcRenderer;
-        } catch (e) {
-            console.warn('Failed to require electron:', e);
-        }
-    }
-    // Try window.electron (preload script approach)
-    if ((window as any).electron?.ipcRenderer) {
-        return (window as any).electron.ipcRenderer;
-    }
-    // Try global require
-    if (typeof require !== 'undefined') {
-        try {
-            return require('electron').ipcRenderer;
-        } catch (e) {
-            console.warn('Failed to global require electron:', e);
-        }
-    }
-    return null;
-};
-
-const ipcRenderer = getIpcRenderer();
+// Electron API (exposed via preload.js with context isolation)
+const electronAPI = (window as any).electronAPI;
 
 interface WelcomeScreenProps {
     onOpenFolder: (folder: { name: string; path: string; fileSystem?: any[] }) => void;
@@ -72,13 +48,11 @@ export const WelcomeScreen = ({ onOpenFolder, onCloneRepo }: WelcomeScreenProps)
 
     const handleOpenFolder = async () => {
         console.log('handleOpenFolder called');
-        console.log('ipcRenderer available:', !!ipcRenderer);
+        console.log('electronAPI available:', !!electronAPI);
 
-        if (!ipcRenderer) {
+        if (!electronAPI) {
             // Fallback for non-Electron environment
             console.warn('Not running in Electron, using demo folder');
-            console.log('window.require:', typeof (window as any).require);
-            console.log('window.electron:', typeof (window as any).electron);
             onOpenFolder({
                 name: 'demo-project',
                 path: '/home/user/demo-project'
@@ -90,8 +64,8 @@ export const WelcomeScreen = ({ onOpenFolder, onCloneRepo }: WelcomeScreenProps)
 
         try {
             console.log('Invoking open-folder-dialog...');
-            // Open native folder dialog via Electron IPC
-            const result = await ipcRenderer.invoke('open-folder-dialog');
+            // Open native folder dialog via Electron API
+            const result = await electronAPI.openFolderDialog();
             console.log('Dialog result:', result);
 
             if (result) {

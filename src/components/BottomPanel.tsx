@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Terminal as TerminalIcon, FileOutput, X, Minimize2 } from 'lucide-react';
-import { TerminalEnhanced } from './TerminalEnhanced';
+import { TerminalXterm } from './TerminalXterm';
 import { useOS } from '../context/OSContext';
 
 interface BottomPanelProps {
@@ -98,7 +98,7 @@ export const BottomPanel = ({ onCollapse, onClick }: BottomPanelProps) => {
             {/* Tab Content */}
             <div className="flex-1 overflow-hidden">
                 {activeTab === 'terminal' && (
-                    <TerminalEnhanced />
+                    <TerminalXterm />
                 )}
 
                 {activeTab === 'output' && (
