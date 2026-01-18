@@ -681,7 +681,7 @@ export const Workspace = () => {
             {/* Logo */}
             <div className="flex items-center space-x-2 cursor-pointer px-1">
               <img src="/logo.png" alt="Logo" className="w-7 h-7 object-contain" />
-              <div className="text-glow-accent font-bold tracking-wider text-sm" style={{ color: 'var(--accent-primary)' }}>HENU</div>
+              <div className="text-glow-accent font-bold tracking-wider text-sm" style={{ color: 'var(--accent-primary)' }}>HENU IDE</div>
             </div>
 
             {/* Separator */}

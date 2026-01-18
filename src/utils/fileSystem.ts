@@ -17,9 +17,9 @@ export class VirtualFileSystem {
   }
 
   private initializeDefaultProject() {
-    this.createFile('/index.html', '<html>\n  <body>\n    <h1>HENU OS</h1>\n  </body>\n</html>');
+    this.createFile('/index.html', '<html>\n  <body>\n    <h1>HENU IDE</h1>\n  </body>\n</html>');
     this.createFile('/style.css', 'body {\n  margin: 0;\n  font-family: monospace;\n}');
-    this.createFile('/script.js', 'console.log("HENU OS Initialized");');
+    this.createFile('/script.js', 'console.log("HENU IDE Initialized");');
   }
 
   private generateId(): string {

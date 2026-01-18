@@ -24,9 +24,9 @@ export interface Theme {
 export const themes: Record<string, Theme> = {
     henu: {
         id: 'henu',
-        name: 'HENU OS',
+        name: 'HENU IDE',
         colors: {
-            name: 'HENU OS',
+            name: 'HENU IDE',
             background: '#000000',
             secondaryBackground: '#0a0a0a',
             tertiaryBackground: '#121212',

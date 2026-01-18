@@ -23,7 +23,7 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js'),
             webSecurity: false, // Allow loading Monaco from CDN
         },
-        title: "HENU OS",
+        title: "HENU IDE",
         backgroundColor: '#000000',
         frame: false, // Frameless window for custom title bar
         show: false
@@ -120,7 +120,7 @@ function startTerminal(window, terminalId) {
                 if (ptyProcess && !ptyProcess.killed) {
                     ptyProcess.write('cls\r');
                     ptyProcess.write('echo "========================================="\r');
-                    ptyProcess.write(`echo "    HENU OS - TERMINAL ${terminalId}"\r`);
+                    ptyProcess.write(`echo "    HENU IDE - TERMINAL ${terminalId}"\r`);
                     ptyProcess.write('echo "========================================="\r');
                     ptyProcess.write('echo.\r');
                 }
@@ -177,7 +177,7 @@ function startTerminal(window, terminalId) {
                 if (ptyProcess && !ptyProcess.killed) {
                     ptyProcess.write('clear\r');
                     ptyProcess.write('echo "========================================="\r');
-                    ptyProcess.write(`echo "    HENU OS - TERMINAL ${terminalId}"\r`);
+                    ptyProcess.write(`echo "    HENU IDE - TERMINAL ${terminalId}"\r`);
                     ptyProcess.write('echo "========================================="\r');
                     ptyProcess.write('echo ""\r');
                 }

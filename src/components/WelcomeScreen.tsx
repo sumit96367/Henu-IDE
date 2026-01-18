@@ -131,7 +131,7 @@ export const WelcomeScreen = ({ onOpenFolder, onCloneRepo }: WelcomeScreenProps)
                         </div>
                     </div>
                     <h1 className="text-5xl font-bold text-white mb-3 tracking-tight">
-                        Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-red-600">HENU</span>
+                        Welcome to <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-red-600">HENU IDE</span>
                     </h1>
                     <p className="text-gray-400 text-lg">
                         The next-generation cloud IDE with AI-powered assistance

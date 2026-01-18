@@ -62,7 +62,7 @@ interface TerminalTheme {
 
 const terminalThemes: Record<string, TerminalTheme> = {
     henu: {
-        name: 'HENU OS',
+        name: 'HENU IDE',
         background: '#0a0a0f',
         foreground: '#e0e0e0',
         cursor: '#ff4444',
@@ -314,7 +314,7 @@ export const TerminalXterm = () => {
         } else {
             // Fallback for non-Electron environment
             xterm.writeln('\x1b[1;32m═══════════════════════════════════════════\x1b[0m');
-            xterm.writeln('\x1b[1;36m     HENU OS Terminal (Web Preview)       \x1b[0m');
+            xterm.writeln('\x1b[1;36m     HENU IDE Terminal (Web Preview)       \x1b[0m');
             xterm.writeln('\x1b[1;32m═══════════════════════════════════════════\x1b[0m');
             xterm.writeln('');
             xterm.writeln('\x1b[33mNote: Real shell commands require Electron.\x1b[0m');

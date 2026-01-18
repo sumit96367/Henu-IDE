@@ -57,7 +57,7 @@ interface TerminalTheme {
 
 const terminalThemes: Record<string, TerminalTheme> = {
     henu: {
-        name: 'HENU OS',
+        name: 'HENU IDE',
         background: 'bg-black/40',
         foreground: 'text-gray-300',
         border: 'border-red-900/30',
