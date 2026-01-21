@@ -120,7 +120,7 @@ export const Workspace = () => {
   const [showNewProject, setShowNewProject] = useState(false);
 
   // OS Context
-  const { state, createFile, addOutputMessage, updateFileSystem, setCurrentPath, openTab } = useOS();
+  const { state, createFile, addOutputMessage, updateFileSystem, setCurrentPath, openTab, openFolder, loadRealDirectory } = useOS();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -489,7 +489,20 @@ export const Workspace = () => {
         break;
       case 'saveAs':
         if (state.activeFile) {
-          setDialogType('saveAs');
+          if (electronAPI) {
+            (async () => {
+              try {
+                const result = await electronAPI.saveFileDialog(state.activeFile!.name, state.activeFile!.content || '');
+                if (result.success) {
+                  addOutputMessage(`Saved As: ${result.path}`, 'success');
+                }
+              } catch (err: any) {
+                addOutputMessage(`Save As error: ${err.message}`, 'error');
+              }
+            })();
+          } else {
+            setDialogType('saveAs');
+          }
         } else {
           addOutputMessage('No file to save', 'warning');
         }

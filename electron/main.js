@@ -300,11 +300,14 @@ const readDirectoryRecursive = (dirPath, maxDepth = 5, currentDepth = 0) => {
     try {
         const items = fs.readdirSync(dirPath, { withFileTypes: true });
 
-        // Filter out hidden files and node_modules for performance
+        // Filter out hidden files and large/irrelevant directories for performance
+        const ignoredDirs = [
+            'node_modules', '__pycache__', '.git', '.next', 'dist', 'build', '.env', 'vendor', '.cache',
+            'AppData', 'Local Settings', 'Application Data', 'My Documents', 'Templates', 'Start Menu'
+        ];
         const filteredItems = items.filter(item =>
             !item.name.startsWith('.') &&
-            item.name !== 'node_modules' &&
-            item.name !== '__pycache__'
+            !ignoredDirs.includes(item.name)
         );
 
         return filteredItems.map((item, index) => {
@@ -436,47 +439,15 @@ ipcMain.handle('read-file', async (event, filePath) => {
     }
 });
 
-// Read directory contents recursively
+// Read directory contents recursively with safety limits
 ipcMain.handle('read-directory', async (event, dirPath) => {
+    console.log('IPC: Reading directory:', dirPath);
     try {
-        const readDirRecursive = (dir) => {
-            const items = fs.readdirSync(dir, { withFileTypes: true });
-            return items.map((item, index) => {
-                const itemPath = path.join(dir, item.name);
-                const node = {
-                    id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                    name: item.name,
-                    type: item.isDirectory() ? 'directory' : 'file',
-                    path: itemPath,
-                    modified: new Date()
-                };
-
-                if (item.isDirectory()) {
-                    // For directories, read children (but limit depth)
-                    try {
-                        node.children = readDirRecursive(itemPath);
-                    } catch {
-                        node.children = [];
-                    }
-                } else {
-                    // For files, read content if small enough
-                    try {
-                        const stats = fs.statSync(itemPath);
-                        if (stats.size < 100000) { // Less than 100KB
-                            node.content = fs.readFileSync(itemPath, 'utf-8');
-                        }
-                    } catch {
-                        node.content = '';
-                    }
-                }
-
-                return node;
-            });
-        };
-
-        const fileSystem = readDirRecursive(dirPath);
+        // Use the existing robust recursive function instead of re-implementing it
+        const fileSystem = readDirectoryRecursive(dirPath, 2); // Limit to 2 levels for performance on startup
         return { success: true, fileSystem };
     } catch (error) {
+        console.error('Error in read-directory handler:', error);
         return { success: false, error: error.message };
     }
 });
@@ -588,6 +559,58 @@ ipcMain.handle('save-file-dialog', async (event, defaultName, content) => {
         if (result.canceled || !result.filePath) return { success: false, canceled: true };
         fs.writeFileSync(result.filePath, content, 'utf-8');
         return { success: true, path: result.filePath };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Get Home Directory
+ipcMain.handle('get-home-directory', () => {
+    return os.homedir();
+});
+
+// Get Drives (Windows specific, returns simplified list for other platforms)
+ipcMain.handle('get-drives', () => {
+    if (process.platform === 'win32') {
+        // Simple way to list common drives on Windows
+        const drives = ['C:', 'D:', 'E:', 'F:', 'G:'];
+        const activeDrives = [];
+        for (const drive of drives) {
+            try {
+                if (fs.existsSync(drive + '\\')) {
+                    activeDrives.push({ name: `Local Disk (${drive})`, path: drive + '\\', icon: 'fa-hdd' });
+                }
+            } catch (e) {
+                // Ignore errors (e.g. drive not ready)
+            }
+        }
+        return activeDrives;
+    } else {
+        return [
+            { name: 'Root', path: '/', icon: 'fa-hdd' }
+        ];
+    }
+});
+
+// Rename file or folder on disk
+ipcMain.handle('rename-on-disk', async (event, oldPath, newPath) => {
+    try {
+        if (!fs.existsSync(oldPath)) return { success: false, error: 'Source does not exist' };
+        if (fs.existsSync(newPath)) return { success: false, error: 'Destination already exists' };
+        fs.renameSync(oldPath, newPath);
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+});
+
+// Move file or folder on disk
+ipcMain.handle('move-on-disk', async (event, oldPath, newPath) => {
+    try {
+        if (!fs.existsSync(oldPath)) return { success: false, error: 'Source does not exist' };
+        if (fs.existsSync(newPath)) return { success: false, error: 'Destination already exists' };
+        fs.renameSync(oldPath, newPath); // renameSync works as move if across same partition
+        return { success: true };
     } catch (error) {
         return { success: false, error: error.message };
     }

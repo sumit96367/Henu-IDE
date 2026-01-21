@@ -1,18 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { useOS } from '../context/OSContext';
+import { useOS, FileSystemNode } from '../context/OSContext';
 import { getGitService } from '../services/GitService';
 import {
   FolderIcon, FileIcon, ChevronRight, ChevronDown,
-  Plus, FolderPlus, Trash2, Edit3, Copy, Download,
+  Plus, Trash2, Edit3, Copy, Download,
   RefreshCw, Search, Terminal, X,
-  FileText, Image, Code, Database, Music, Video,
-  Globe, Settings, Type, Binary, Lock, Unlock, Upload,
-  Heart, Pin, History,
-  Grid3x3, List, MoreVertical,
-  ArrowUpRight,
+  FileText, Image, Code, Database, Lock, Upload,
+  Heart, Pin,
   FilePlus, FolderPlus as FolderPlusIcon, FolderTree,
-  Zap, Cpu
+  Music, Video, Globe, Settings, Type,
+  Binary
 } from 'lucide-react';
 
 export const FileExplorer = () => {
@@ -22,7 +20,6 @@ export const FileExplorer = () => {
     createFile,
     createDirectory,
     deleteNode,
-    updateFileContent,
     getNodeByPath,
     setCurrentPath,
     updateFileSystem,
@@ -30,8 +27,8 @@ export const FileExplorer = () => {
     moveNode,
     findNodeById: findNodeByIdContext,
     getParentNode: getParentNodeContext,
-    listDirectory,
-    getCurrentDirectory
+    loadRealDirectory,
+    openFolder
   } = useOS();
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['1', '2']));
@@ -45,22 +42,22 @@ export const FileExplorer = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
-  const [showHidden, setShowHidden] = useState(false);
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [dragOverNode, setDragOverNode] = useState<string | null>(null);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
-  const [showQuickActions, setShowQuickActions] = useState(false);
   const [showTags, setShowTags] = useState(false);
-  const [currentTag, setCurrentTag] = useState<string | null>(null);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [multiSelect, setMultiSelect] = useState<Set<string>>(new Set());
   const [clipboard, setClipboard] = useState<{ type: 'cut' | 'copy', node: any } | null>(null);
   const [breadcrumb, setBreadcrumb] = useState<string[]>([]);
   const [gitStatus, setGitStatus] = useState<Map<string, string>>(new Map());
   const [isRepo, setIsRepo] = useState(false);
+  const [quickAccessItems, setQuickAccessItems] = useState<{ name: string; path: string; icon: string }[]>([]);
+  const [showQuickAccess, setShowQuickAccess] = useState(true);
+  const [showHidden, setShowHidden] = useState(false);
+  const [currentTag, setCurrentTag] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const dragCounter = useRef(0);
 
   // Update breadcrumb when current path changes
   useEffect(() => {
@@ -137,7 +134,33 @@ export const FileExplorer = () => {
     return () => window.removeEventListener('git-changed', handleGitChange);
   }, [loadGitStatus]);
 
-  // Update selected node when active file changes
+  // Load Quick Access items
+  const loadQuickAccess = useCallback(async () => {
+    const api = (window as any).electronAPI;
+    if (!api || !api.getHomeDirectory) return;
+
+    try {
+      const homeDir = await api.getHomeDirectory();
+      const drives = await api.getDrives();
+
+      const items = [
+        { name: 'Home', path: homeDir, icon: 'Home' },
+        { name: 'Desktop', path: api.path.join(homeDir, 'Desktop'), icon: 'Monitor' },
+        { name: 'Documents', path: api.path.join(homeDir, 'Documents'), icon: 'FileText' },
+        { name: 'Downloads', path: api.path.join(homeDir, 'Downloads'), icon: 'Download' },
+        { name: 'Pictures', path: api.path.join(homeDir, 'Pictures'), icon: 'Image' },
+        ...drives.map((d: any) => ({ name: d.name, path: d.path, icon: 'Database' }))
+      ];
+
+      setQuickAccessItems(items);
+    } catch (error) {
+      console.error('Error loading quick access:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadQuickAccess();
+  }, [loadQuickAccess]);
   useEffect(() => {
     if (state.activeFile) {
       setSelectedNodeId(state.activeFile.id);
@@ -231,6 +254,25 @@ export const FileExplorer = () => {
       // Enter key for rename
       if (e.key === 'Enter' && editingNodeId) {
         handleRename(editingNodeId);
+      }
+
+      // F2 for rename
+      if (e.key === 'F2' && selectedNodeId && !editingNodeId) {
+        e.preventDefault();
+        const node = findNodeById(selectedNodeId);
+        if (node) startRename(node);
+      }
+
+      // F5 for refresh
+      if (e.key === 'F5') {
+        e.preventDefault();
+        handleRefresh();
+      }
+
+      // Delete key
+      if (e.key === 'Delete' && selectedNodeId && !editingNodeId) {
+        e.preventDefault();
+        handleDelete(selectedNodeId);
       }
 
       // Arrow keys for navigation
@@ -873,8 +915,8 @@ export const FileExplorer = () => {
                   if (!status) return null;
                   return (
                     <span className={`text-[10px] ml-1.5 px-1 rounded-sm font-bold ${status === 'M' ? 'bg-yellow-500/20 text-yellow-400' :
-                        status === 'A' ? 'bg-green-500/20 text-green-400' :
-                          'bg-gray-500/20 text-gray-400'
+                      status === 'A' ? 'bg-green-500/20 text-green-400' :
+                        'bg-gray-500/20 text-gray-400'
                       }`}>
                       {status === '?' ? 'U' : status}
                     </span>
@@ -941,8 +983,8 @@ export const FileExplorer = () => {
 
         {node.type === 'directory' && isExpanded && filteredChildren.length > 0 && (
           <div>
-            {getSortedChildren(filteredChildren).map((child: any) =>
-              renderNode(child, depth + 1, nodePath)
+            {getSortedChildren(filteredChildren).map((child: FileSystemNode) =>
+              renderNode(child, depth + 1)
             )}
           </div>
         )}
@@ -983,8 +1025,12 @@ export const FileExplorer = () => {
   };
 
   const handleRefresh = () => {
-    // Force re-render
-    updateFileSystem([...state.fileSystem]);
+    if (state.rootPath) {
+      loadRealDirectory(state.rootPath);
+    } else {
+      // Force re-render for virtual FS
+      updateFileSystem([...state.fileSystem]);
+    }
     showToast('Refreshed file system', 'info');
   };
 
@@ -1041,6 +1087,14 @@ export const FileExplorer = () => {
           </button>
 
           <button
+            onClick={() => openFolder()}
+            className="p-2 hover:bg-theme-accent/30 rounded text-theme-accent transition-colors"
+            title="Open Folder"
+          >
+            <FolderPlusIcon size={16} className="text-yellow-400" />
+          </button>
+
+          <button
             onClick={() => handleNewFolder()}
             className="p-2 hover:bg-gray-800 rounded text-gray-400 transition-colors"
             title="New Folder"
@@ -1072,6 +1126,37 @@ export const FileExplorer = () => {
       <div className="flex-1 flex overflow-hidden">
         {/* File List */}
         <div className={`flex-1 overflow-auto p-1 ${showInfoPanel ? 'w-3/4' : 'w-full'}`}>
+          {/* Quick Access Section */}
+          <div className="mb-4">
+            <button
+              onClick={() => setShowQuickAccess(!showQuickAccess)}
+              className="flex items-center space-x-2 px-2 py-1 w-full text-left text-xs font-bold text-gray-500 uppercase tracking-wider hover:bg-white/5 transition-all"
+            >
+              {showQuickAccess ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <span>Quick Access</span>
+            </button>
+
+            {showQuickAccess && (
+              <div className="mt-1 space-y-0.5">
+                {quickAccessItems.map((item, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => loadRealDirectory(item.path)}
+                    className="flex items-center space-x-2 px-3 py-1.5 text-xs text-gray-400 hover:bg-theme-accent/10 hover:text-white cursor-pointer transition-all group"
+                  >
+                    <div className="w-4 flex justify-center">
+                      {item.name === 'Home' && <Pin size={12} className="text-blue-400" />}
+                      {item.name !== 'Home' && <ChevronRight size={10} className="opacity-0 group-hover:opacity-100 transition-opacity" />}
+                    </div>
+                    <span>{item.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="h-px bg-gray-800/50 mb-4 mx-2"></div>
+
           {state.fileSystem.map((node: any) => renderNode(node))}
 
           {

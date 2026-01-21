@@ -39,6 +39,7 @@ interface OSState {
   aiMessages: AIMessage[];
   fileSystem: FileSystemNode[];
   currentPath: string;
+  rootPath: string | null;
   openTabs: FileSystemNode[];
   outputMessages: { message: string; type: 'info' | 'success' | 'error' | 'warning'; timestamp: Date }[];
 }
@@ -61,7 +62,8 @@ type OSAction =
   | { type: 'CLOSE_TAB'; payload: string }
   | { type: 'CLOSE_ALL_TABS' }
   | { type: 'ADD_OUTPUT_MESSAGE'; payload: { message: string; type: 'info' | 'success' | 'error' | 'warning' } }
-  | { type: 'CLEAR_OUTPUT' };
+  | { type: 'CLEAR_OUTPUT' }
+  | { type: 'SET_ROOT_PATH', payload: string };
 
 // Enhanced Initial State
 const initialFileSystem: FileSystemNode[] = [
@@ -203,6 +205,7 @@ const initialState: OSState = {
   aiMessages: [],
   fileSystem: initialFileSystem,
   currentPath: '/home/user',
+  rootPath: null,
   openTabs: [],
   outputMessages: [],
 };
@@ -423,13 +426,11 @@ const osReducer = (state: OSState, action: OSAction): OSState => {
 
       // Find the node to move
       let nodeToMove: FileSystemNode | null = null;
-      let sourceParentId: string | undefined;
 
       const findAndRemoveNode = (nodes: FileSystemNode[]): FileSystemNode[] => {
         return nodes.filter(node => {
           if (node.id === nodeId) {
             nodeToMove = { ...node };
-            sourceParentId = node.parentId;
             return false;
           }
           if (node.children) {
@@ -446,9 +447,8 @@ const osReducer = (state: OSState, action: OSAction): OSState => {
         return state;
       }
 
-      // Update node with new parent
-      nodeToMove = {
-        ...nodeToMove,
+      const movedNode: FileSystemNode = {
+        ...(nodeToMove as FileSystemNode),
         parentId: targetParentId,
         modified: new Date(),
       };
@@ -459,7 +459,7 @@ const osReducer = (state: OSState, action: OSAction): OSState => {
           if (node.id === targetParentId) {
             return {
               ...node,
-              children: [...(node.children || []), nodeToMove!],
+              children: [...(node.children || []), movedNode],
               modified: new Date(),
             };
           }
@@ -552,6 +552,9 @@ const osReducer = (state: OSState, action: OSAction): OSState => {
       };
     }
 
+    case 'SET_ROOT_PATH':
+      return { ...state, rootPath: action.payload };
+
     default:
       return state;
   }
@@ -587,6 +590,8 @@ interface OSContextType {
   closeAllTabs: () => void;
   addOutputMessage: (message: string, type?: 'info' | 'success' | 'error' | 'warning') => void;
   clearOutput: () => void;
+  loadRealDirectory: (path: string) => Promise<void>;
+  openFolder: () => Promise<void>;
 }
 
 const OSContext = createContext<OSContextType | undefined>(undefined);
@@ -595,21 +600,30 @@ const OSContext = createContext<OSContextType | undefined>(undefined);
 export const OSProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(osReducer, initialState);
 
-  // Initialize Git service
+  // Initialize Git service and load actual home directory if in Electron
   useEffect(() => {
-    const initGit = async () => {
+    const initOS = async () => {
       try {
+        const api = (window as any).electronAPI;
+        if (api && api.getHomeDirectory) {
+          const homeDir = await api.getHomeDirectory();
+
+          if (!state.rootPath) {
+            loadRealDirectory(homeDir);
+          }
+        }
+
         const { initGitService } = await import('../services/GitService');
         const { getSimpleFS } = await import('../services/SimpleFS');
         const fs = getSimpleFS();
         initGitService(fs, state.currentPath || '/workspace');
         console.log('Git service initialized for:', state.currentPath || '/workspace');
       } catch (error) {
-        console.error('Failed to initialize Git:', error);
+        console.error('Failed to initialize OS:', error);
       }
     };
-    initGit();
-  }, [state.currentPath]);
+    initOS();
+  }, []); // Only run once on mount
 
   // Helper functions
   const addTerminalCommand = (command: string, output: string, isError?: boolean) => {
@@ -664,28 +678,112 @@ export const OSProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     }
   };
 
-  const updateFileContent = (id: string, content: string) => {
+  const updateFileContent = async (id: string, content: string) => {
     dispatch({ type: 'UPDATE_FILE_CONTENT', payload: { id, content } });
+
+    // Persistence
+    const file = findNodeById(id);
+    if (file && file.path && (window as any).electronAPI) {
+      await (window as any).electronAPI.saveFile(file.path, content);
+    }
   };
 
-  const createFile = (name: string, content?: string, parentId?: string) => {
-    dispatch({ type: 'CREATE_FILE', payload: { name, content, parentId } });
+  const createFile = async (name: string, content?: string, parentId?: string) => {
+    const api = (window as any).electronAPI;
+    if (state.rootPath && api) {
+      let parentPath = state.rootPath;
+      if (parentId) {
+        const parentNode = findNodeById(parentId);
+        if (parentNode && parentNode.path) parentPath = parentNode.path;
+      }
+
+      const result = await api.createFileOnDisk(parentPath, name, content || '');
+      if (result.success) {
+        await loadRealDirectory(state.rootPath);
+        addOutputMessage(`Created file: ${name}`, 'success');
+      } else {
+        addOutputMessage(`Failed to create file: ${result.error}`, 'error');
+      }
+    } else {
+      dispatch({ type: 'CREATE_FILE', payload: { name, content, parentId } });
+    }
   };
 
-  const createDirectory = (name: string, parentId?: string) => {
-    dispatch({ type: 'CREATE_DIRECTORY', payload: { name, parentId } });
+  const createDirectory = async (name: string, parentId?: string) => {
+    const api = (window as any).electronAPI;
+    if (state.rootPath && api) {
+      let parentPath = state.rootPath;
+      if (parentId) {
+        const parentNode = findNodeById(parentId);
+        if (parentNode && parentNode.path) parentPath = parentNode.path;
+      }
+
+      const result = await api.createFolderOnDisk(parentPath, name);
+      if (result.success) {
+        await loadRealDirectory(state.rootPath);
+        addOutputMessage(`Created folder: ${name}`, 'success');
+      } else {
+        addOutputMessage(`Failed to create folder: ${result.error}`, 'error');
+      }
+    } else {
+      dispatch({ type: 'CREATE_DIRECTORY', payload: { name, parentId } });
+    }
   };
 
-  const deleteNode = (id: string) => {
-    dispatch({ type: 'DELETE_NODE', payload: id });
+  const deleteNode = async (id: string) => {
+    const node = findNodeById(id);
+    const api = (window as any).electronAPI;
+    if (state.rootPath && node && node.path && api) {
+      const result = await api.deleteFromDisk(node.path);
+      if (result.success) {
+        await loadRealDirectory(state.rootPath);
+        addOutputMessage(`Deleted: ${node.name}`, 'success');
+      } else {
+        addOutputMessage(`Failed to delete: ${result.error}`, 'error');
+      }
+    } else {
+      dispatch({ type: 'DELETE_NODE', payload: id });
+    }
   };
 
-  const updateNode = (id: string, updates: Partial<FileSystemNode>) => {
-    dispatch({ type: 'UPDATE_NODE', payload: { id, updates } });
+  const updateNode = async (id: string, updates: Partial<FileSystemNode>) => {
+    const node = findNodeById(id);
+    const api = (window as any).electronAPI;
+
+    if (state.rootPath && node && node.path && updates.name && api) {
+      const parentDir = api.path.dirname(node.path);
+      const newPath = api.path.join(parentDir, updates.name);
+
+      const result = await api.renameOnDisk(node.path, newPath);
+      if (result.success) {
+        await loadRealDirectory(state.rootPath);
+        addOutputMessage(`Renamed: ${node.name} -> ${updates.name}`, 'success');
+      } else {
+        addOutputMessage(`Failed to rename: ${result.error}`, 'error');
+      }
+    } else {
+      dispatch({ type: 'UPDATE_NODE', payload: { id, updates } });
+    }
   };
 
-  const moveNode = (nodeId: string, targetParentId: string) => {
-    dispatch({ type: 'MOVE_NODE', payload: { nodeId, targetParentId } });
+  const moveNode = async (nodeId: string, targetParentId: string) => {
+    const node = findNodeById(nodeId);
+    const targetParent = findNodeById(targetParentId);
+    const api = (window as any).electronAPI;
+
+    if (state.rootPath && node && node.path && targetParent && targetParent.path && api) {
+      const newPath = api.path.join(targetParent.path, node.name);
+      const result = await api.moveOnDisk(node.path, newPath);
+
+      if (result.success) {
+        await loadRealDirectory(state.rootPath);
+        addOutputMessage(`Moved ${node.name} to ${targetParent.name}`, 'success');
+      } else {
+        addOutputMessage(`Failed to move: ${result.error}`, 'error');
+      }
+    } else {
+      dispatch({ type: 'MOVE_NODE', payload: { nodeId, targetParentId } });
+    }
   };
 
   const findNodeById = (id: string, nodes: FileSystemNode[] = state.fileSystem): FileSystemNode | null => {
@@ -739,9 +837,9 @@ export const OSProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
     for (const part of parts) {
       if (!currentNode?.children) return null;
-      const found = currentNode.children.find(child => child.name === part);
-      if (!found) return null;
-      currentNode = found;
+      const foundCandidate: FileSystemNode | undefined = currentNode.children.find(child => child.name === part);
+      if (!foundCandidate) return null;
+      currentNode = foundCandidate;
     }
 
     return currentNode;
@@ -787,6 +885,44 @@ export const OSProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     dispatch({ type: 'CLEAR_OUTPUT' });
   };
 
+  const loadRealDirectory = async (path: string) => {
+    try {
+      const api = (window as any).electronAPI;
+      if (!api) return;
+
+      const result = await api.readDirectory(path);
+      if (result.success) {
+        dispatch({ type: 'UPDATE_FILE_SYSTEM', payload: result.fileSystem });
+        dispatch({ type: 'SET_ROOT_PATH', payload: path });
+        dispatch({ type: 'SET_CURRENT_PATH', payload: path });
+        addOutputMessage(`Loaded directory: ${path}`, 'success');
+      } else {
+        addOutputMessage(`Error loading directory: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      console.error('Failed to load real directory:', error);
+      addOutputMessage('Failed to load real directory', 'error');
+    }
+  };
+
+  const openFolder = async () => {
+    try {
+      const api = (window as any).electronAPI;
+      if (!api) return;
+
+      const result = await api.openFolderDialog();
+      if (result) {
+        dispatch({ type: 'UPDATE_FILE_SYSTEM', payload: result.fileSystem });
+        dispatch({ type: 'SET_ROOT_PATH', payload: result.path });
+        dispatch({ type: 'SET_CURRENT_PATH', payload: result.path });
+        addOutputMessage(`Opened folder: ${result.name}`, 'success');
+      }
+    } catch (error) {
+      console.error('Failed to open folder:', error);
+      addOutputMessage('Failed to open folder', 'error');
+    }
+  };
+
   // Context value
   const contextValue: OSContextType = {
     state,
@@ -817,6 +953,8 @@ export const OSProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     closeAllTabs,
     addOutputMessage,
     clearOutput,
+    loadRealDirectory,
+    openFolder,
   };
 
   return (

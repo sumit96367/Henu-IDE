@@ -67,7 +67,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createFileOnDisk: (parentPath, fileName, content) => ipcRenderer.invoke('create-file-on-disk', parentPath, fileName, content),
     createFolderOnDisk: (parentPath, folderName) => ipcRenderer.invoke('create-folder-on-disk', parentPath, folderName),
     deleteFromDisk: (itemPath) => ipcRenderer.invoke('delete-from-disk', itemPath),
-    saveFileDialog: (defaultName, content) => ipcRenderer.invoke('save-file-dialog', defaultName, content)
+    saveFileDialog: (defaultName, content) => ipcRenderer.invoke('save-file-dialog', defaultName, content),
+    renameOnDisk: (oldPath, newPath) => ipcRenderer.invoke('rename-on-disk', oldPath, newPath),
+    moveOnDisk: (oldPath, newPath) => ipcRenderer.invoke('move-on-disk', oldPath, newPath),
+
+    // System info
+    getHomeDirectory: () => ipcRenderer.invoke('get-home-directory'),
+    getDrives: () => ipcRenderer.invoke('get-drives'),
+    platform: process.platform,
+
+    // Path utilities
+    path: {
+        join: (...args) => args.join(process.platform === 'win32' ? '\\' : '/'), // Simple fallback, better to handle in main
+        extname: (filename) => {
+            const parts = filename.split('.');
+            return parts.length > 1 ? '.' + parts.pop() : '';
+        },
+        dirname: (filePath) => {
+            const separator = (process.platform === 'win32' && filePath.includes('\\')) ? '\\' : '/';
+            const parts = filePath.split(separator);
+            parts.pop();
+            return parts.join(separator) || (separator === '/' ? '/' : '.\\');
+        }
+    },
+
+    // Helpers
+    formatBytes: (bytes, decimals = 2) => {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    },
+
+    formatDate: (date) => {
+        return new Date(date).toLocaleString();
+    }
 });
 
 console.log('Preload script loaded');
