@@ -4,8 +4,10 @@ import { ThemeProvider } from './context/ThemeContext';
 import { SplashScreen } from './components/SplashScreen';
 import { Workspace } from './components/Workspace';
 import { WelcomeScreen } from './components/WelcomeScreen';
+import { Auth } from './components/Auth';
+import { supabase } from './services/supabase';
 
-type AppPhase = 'splash' | 'welcome' | 'workspace';
+type AppPhase = 'splash' | 'auth' | 'welcome' | 'workspace';
 
 interface OpenFolder {
   name: string;
@@ -15,17 +17,44 @@ interface OpenFolder {
 
 function AppContent() {
   const [phase, setPhase] = useState<AppPhase>('splash');
+  const [session, setSession] = useState<any>(null);
   const { updateFileSystem, setCurrentPath } = useOS();
 
-  // Auto-transition from splash to welcome after splash completes
+  // Check for session on mount
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Auto-transition from splash to auth/welcome after splash completes
   useEffect(() => {
     if (phase === 'splash') {
       const timer = setTimeout(() => {
-        setPhase('welcome');
+        if (!session) {
+          setPhase('auth');
+        } else {
+          setPhase('welcome');
+        }
       }, 2500); // Match splash screen duration
       return () => clearTimeout(timer);
     }
-  }, [phase]);
+  }, [phase, session]);
+
+  // Handle session established while on auth screen
+  useEffect(() => {
+    if (session && phase === 'auth') {
+      setPhase('welcome');
+    }
+  }, [session, phase]);
 
   const handleOpenFolder = (folder: OpenFolder) => {
     // Update the file system in context if we have file data
@@ -45,12 +74,17 @@ function AppContent() {
     return <SplashScreen />;
   }
 
+  // Show auth screen if not signed in
+  if (phase === 'auth' || !session) {
+    return <Auth onAuthenticated={() => setPhase('welcome')} />;
+  }
+
   // Show welcome screen if no folder is open
   if (phase === 'welcome') {
     return (
       <WelcomeScreen
         onOpenFolder={handleOpenFolder}
-        onCloneRepo={(url, name) => {
+        onCloneRepo={(_url, name) => {
           handleOpenFolder({
             name,
             path: `/home/user/projects/${name}`,

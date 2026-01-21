@@ -18,6 +18,8 @@ import {
   Bell, GitBranch, Palette, Check, Settings, User
 } from 'lucide-react';
 import { useTheme, themes } from '../context/ThemeContext';
+import { supabase } from '../services/supabase';
+import { LogOut, Shield } from 'lucide-react';
 
 // Electron API (exposed via preload.js with context isolation)
 const electronAPI = (window as any).electronAPI;
@@ -113,6 +115,15 @@ export const Workspace = () => {
     { id: 3, title: 'System Update', message: 'HENU v1.2 available', time: '1 hour ago', unread: false },
   ]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [user, setUser] = useState<any>(null);
+
+  // Get current user on mount
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user);
+    });
+  }, []);
 
   // Dialog states
   const [dialogType, setDialogType] = useState<'newFile' | 'newFolder' | 'saveAs' | 'openFile' | 'goToLine' | 'find' | 'replace' | null>(null);
@@ -120,7 +131,7 @@ export const Workspace = () => {
   const [showNewProject, setShowNewProject] = useState(false);
 
   // OS Context
-  const { state, createFile, addOutputMessage, updateFileSystem, setCurrentPath, openTab, openFolder, loadRealDirectory } = useOS();
+  const { state, createFile, addOutputMessage, updateFileSystem, setCurrentPath, openTab } = useOS();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -250,6 +261,20 @@ export const Workspace = () => {
     }
     return () => window.removeEventListener('click', handleClickOutside);
   }, [activeMenu]);
+
+  // Close profile menu on click outside
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (showProfileMenu && !target.closest('.profile-container')) {
+        setShowProfileMenu(false);
+      }
+    };
+    if (showProfileMenu) {
+      window.addEventListener('click', handleClick);
+    }
+    return () => window.removeEventListener('click', handleClick);
+  }, [showProfileMenu]);
 
   const handleLayoutChange = (mode: LayoutMode) => {
     setLayoutMode(mode);
@@ -855,9 +880,59 @@ export const Workspace = () => {
                 <Settings size={13} />
               </button>
 
-              <button className="p-1.5 hover:bg-theme-accent/20 rounded transition-all text-theme-accent flex items-center justify-center border border-theme-accent/20" title="Profile">
-                <User size={13} />
-              </button>
+              <div className="relative profile-container">
+                <button
+                  onClick={() => setShowProfileMenu(!showProfileMenu)}
+                  className={`p-1.5 rounded transition-all flex items-center justify-center border ${showProfileMenu ? 'bg-theme-accent/30 border-theme-accent' : 'hover:bg-theme-accent/20 border-theme-accent/20'} text-theme-accent`}
+                  title="Profile"
+                >
+                  <User size={13} />
+                </button>
+
+                {showProfileMenu && (
+                  <div className="absolute right-0 top-full mt-2 w-64 bg-gray-900/95 backdrop-blur-xl rounded-xl shadow-2xl border border-red-900/30 py-4 z-[9999] animate-in fade-in zoom-in-95 duration-200">
+                    <div className="px-4 mb-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 rounded-full bg-theme-accent/20 flex items-center justify-center border border-theme-accent text-theme-accent">
+                          <User size={20} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-bold text-white truncate">{user?.email?.split('@')[0] || 'Operator'}</div>
+                          <div className="text-[10px] text-gray-500 truncate uppercase tracking-tighter">{user?.email || 'OFFLINE_MODE'}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="px-2 space-y-1">
+                      <div className="px-3 py-2 flex items-center justify-between text-xs text-gray-400 bg-black/40 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <Shield size={12} className="text-blue-400" />
+                          <span>Status</span>
+                        </div>
+                        <span className="text-[10px] text-green-400 font-mono">SECURE</span>
+                      </div>
+
+                      <button
+                        onClick={() => { setShowSettings(true); setShowProfileMenu(false); }}
+                        className="w-full px-3 py-2 flex items-center space-x-3 text-xs text-gray-300 hover:bg-white/5 rounded-lg transition-colors"
+                      >
+                        <Settings size={14} />
+                        <span>Account Settings</span>
+                      </button>
+
+                      <div className="h-px bg-white/5 my-2 mx-1" />
+
+                      <button
+                        onClick={() => supabase.auth.signOut()}
+                        className="w-full px-3 py-2 flex items-center space-x-3 text-xs text-red-500 hover:bg-red-500/10 rounded-lg transition-colors font-bold"
+                      >
+                        <LogOut size={14} />
+                        <span>TERMINATE SESSION</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Separator */}

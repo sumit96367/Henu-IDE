@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import {
     X, Settings as SettingsIcon, Palette, Type, Save, Terminal,
-    Keyboard, Monitor, Zap, RotateCcw, Check
+    Keyboard, Monitor, Zap, RotateCcw, Check, User, LogOut, Shield
 } from 'lucide-react';
 import { useTheme, themes } from '../context/ThemeContext';
+import { supabase } from '../services/supabase';
 
 // Settings types
 interface AppSettings {
@@ -84,7 +85,7 @@ interface SettingsPanelProps {
     onClose: () => void;
 }
 
-type SettingsTab = 'appearance' | 'editor' | 'terminal' | 'shortcuts';
+type SettingsTab = 'appearance' | 'editor' | 'terminal' | 'shortcuts' | 'account';
 
 export const SettingsPanel = ({ isOpen, onClose }: SettingsPanelProps) => {
     const { setActiveTheme } = useTheme();
@@ -136,7 +137,15 @@ export const SettingsPanel = ({ isOpen, onClose }: SettingsPanelProps) => {
         { id: 'editor', label: 'Editor', icon: <Type size={16} /> },
         { id: 'terminal', label: 'Terminal', icon: <Terminal size={16} /> },
         { id: 'shortcuts', label: 'Shortcuts', icon: <Keyboard size={16} /> },
+        { id: 'account', label: 'Account', icon: <User size={16} /> },
     ];
+
+    const handleLogout = async () => {
+        const { error } = await supabase.auth.signOut();
+        if (!error) {
+            onClose();
+        }
+    };
 
     if (!isOpen) return null;
 
@@ -457,6 +466,55 @@ export const SettingsPanel = ({ isOpen, onClose }: SettingsPanelProps) => {
                                             </kbd>
                                         </div>
                                     ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Account Tab */}
+                        {activeTab === 'account' && (
+                            <div className="space-y-6">
+                                <h3 className="text-sm font-bold text-theme mb-4 flex items-center space-x-2">
+                                    <User size={16} className="text-theme-accent" />
+                                    <span>Account Protocol</span>
+                                </h3>
+
+                                <div className="p-4 bg-theme-secondary/50 rounded-lg border border-theme">
+                                    <div className="flex items-center space-x-4 mb-6">
+                                        <div className="w-16 h-16 rounded-full bg-theme-accent/20 flex items-center justify-center border-2 border-theme-accent shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                                            <User size={32} className="text-theme-accent" />
+                                        </div>
+                                        <div>
+                                            <div className="text-lg font-bold text-white tracking-tight">Active Session</div>
+                                            <div className="text-sm text-gray-400">Secure Industrial Access</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between p-3 bg-black/30 rounded border border-white/5">
+                                            <div className="flex items-center space-x-3 text-sm text-gray-300">
+                                                <Shield size={16} className="text-blue-400" />
+                                                <span>Security Level</span>
+                                            </div>
+                                            <span className="text-xs font-mono text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded">LEVEL_01</span>
+                                        </div>
+                                        <div className="flex items-center justify-between p-3 bg-black/30 rounded border border-white/5 text-sm text-gray-300">
+                                            <div className="flex items-center space-x-3">
+                                                <Zap size={16} className="text-yellow-400" />
+                                                <span>Session Status</span>
+                                            </div>
+                                            <span className="text-xs font-mono text-green-400">ENCRYPTED</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-8">
+                                        <button
+                                            onClick={handleLogout}
+                                            className="w-full flex items-center justify-center space-x-3 p-3 bg-red-600/10 hover:bg-red-600/20 border border-red-600/30 rounded-lg text-red-500 transition-all font-bold tracking-widest text-xs uppercase"
+                                        >
+                                            <LogOut size={16} />
+                                            <span>Terminate Session</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         )}
